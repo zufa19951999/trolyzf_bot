@@ -12,16 +12,13 @@ import csv
 from datetime import datetime, timedelta
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from dotenv import load_dotenv
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, CallbackContext
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
-from telegram.constants import ParseMode
-from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.constants import ParseMode
 from telegram.error import TelegramError
 from functools import wraps
 
-# ==================== THIẾT LẬP LOGGING CHI TIẾT ====================
+# ==================== THIẾT LẬP LOGGING ====================
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO,
@@ -32,40 +29,25 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ==================== THỜI GIAN VIỆT NAM & BẢO MẬT ====================
-
-# Múi giờ Việt Nam
+# ==================== THỜI GIAN VIỆT NAM ====================
 def get_vn_time():
-    """Lấy thời gian Việt Nam hiện tại (UTC+7)"""
     return datetime.utcnow() + timedelta(hours=7)
 
 def format_vn_time():
-    """Format thời gian Việt Nam đầy đủ"""
     return get_vn_time().strftime("%H:%M:%S %d/%m/%Y")
 
 def format_vn_time_short():
-    """Format thời gian Việt Nam rút gọn"""
     return get_vn_time().strftime("%H:%M %d/%m")
 
-# Rate limiting và bảo mật
+# ==================== RATE LIMITING ====================
 class SecurityManager:
     def __init__(self):
         self.rate_limits = {}
         self.max_requests_per_minute = 30
-    
-    def sanitize_input(self, text):
-        """Lọc input để tránh injection"""
-        dangerous = [';', '--', 'DROP', 'DELETE', 'UPDATE', 'INSERT', 'ALTER', 'EXEC', 'UNION']
-        text_upper = text.upper()
-        for item in dangerous:
-            if item in text_upper:
-                text = text.replace(item, '')
-        return text.strip()
 
 security = SecurityManager()
 
 def rate_limit(max_calls=30):
-    """Decorator giới hạn số lượng request"""
     def decorator(func):
         @wraps(func)
         async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
@@ -76,21 +58,18 @@ def rate_limit(max_calls=30):
                 calls, first_call = security.rate_limits[user_id]
                 if current_time - first_call < 60:
                     if calls >= max_calls:
-                        await update.message.reply_text(
-                            f"⚠️ Bạn đã gửi quá nhiều request. Vui lòng thử lại sau 1 phút.\n\n🕐 {format_vn_time()}"
-                        )
+                        await update.message.reply_text(f"⚠️ Quá nhiều request. Thử lại sau 1 phút.\n\n🕐 {format_vn_time()}")
                         return
                     security.rate_limits[user_id] = (calls + 1, first_call)
                 else:
                     security.rate_limits[user_id] = (1, current_time)
             else:
                 security.rate_limits[user_id] = (1, current_time)
-            
             return await func(update, context, *args, **kwargs)
         return wrapper
     return decorator
 
-# ==================== BẮT LỖI KHỞI ĐỘNG ====================
+# ==================== KHỞI TẠO ====================
 try:
     load_dotenv()
 
@@ -103,9 +82,9 @@ try:
         raise ValueError("TELEGRAM_TOKEN không được để trống")
     
     if not CMC_API_KEY:
-        logger.warning("⚠️ THIẾU CMC_API_KEY - Một số chức năng sẽ không hoạt động")
+        logger.warning("⚠️ THIẾU CMC_API_KEY")
 
-    # ==================== CẤU HÌNH DATABASE TRÊN RENDER DISK ====================
+    # ==================== CẤU HÌNH DATABASE ====================
     DATA_DIR = '/data' if os.path.exists('/data') else os.path.dirname(os.path.abspath(__file__))
     DB_PATH = os.path.join(DATA_DIR, 'crypto_bot.db')
     BACKUP_DIR = os.path.join(DATA_DIR, 'backups')
@@ -115,25 +94,20 @@ try:
     os.makedirs(BACKUP_DIR, exist_ok=True)
     os.makedirs(EXPORT_DIR, exist_ok=True)
 
-    logger.info(f"📁 Dữ liệu sẽ được lưu tại: {DB_PATH}")
+    logger.info(f"📁 Database: {DB_PATH}")
 
     # Cache
     price_cache = {}
     usdt_cache = {'rate': None, 'time': None}
-
-    # Biến toàn cục cho bot
     app = None
 
-    # ==================== HEALTH CHECK SERVER CHO RENDER ====================
+    # ==================== HEALTH CHECK ====================
     class HealthCheckHandler(BaseHTTPRequestHandler):
         def do_GET(self):
             self.send_response(200)
             self.send_header('Content-type', 'text/plain')
             self.end_headers()
-            
-            current_time = format_vn_time()
-            response = f"Crypto Bot Running - {current_time}"
-            self.wfile.write(response.encode('utf-8'))
+            self.wfile.write(f"Crypto Bot Running - {format_vn_time()}".encode('utf-8'))
         
         def log_message(self, format, *args):
             return
@@ -142,10 +116,10 @@ try:
         try:
             port = int(os.environ.get('PORT', 10000))
             server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
-            logger.info(f"✅ Health server running on port {port}")
+            logger.info(f"✅ Health server port {port}")
             server.serve_forever()
         except Exception as e:
-            logger.error(f"❌ Health server error: {e}")
+            logger.error(f"❌ Health server: {e}")
             time.sleep(10)
 
     # ==================== DATABASE SETUP ====================
@@ -157,75 +131,47 @@ try:
             
             c.execute('''CREATE TABLE IF NOT EXISTS portfolio
                          (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                          user_id INTEGER,
-                          symbol TEXT,
-                          amount REAL,
-                          buy_price REAL,
-                          buy_date TEXT,
-                          total_cost REAL)''')
+                          user_id INTEGER, symbol TEXT, amount REAL,
+                          buy_price REAL, buy_date TEXT, total_cost REAL)''')
             
             c.execute('''CREATE TABLE IF NOT EXISTS alerts
                          (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                          user_id INTEGER,
-                          symbol TEXT,
-                          target_price REAL,
-                          condition TEXT,
-                          is_active INTEGER DEFAULT 1,
-                          created_at TEXT,
-                          triggered_at TEXT)''')
+                          user_id INTEGER, symbol TEXT, target_price REAL,
+                          condition TEXT, is_active INTEGER DEFAULT 1,
+                          created_at TEXT, triggered_at TEXT)''')
             
             c.execute('''CREATE TABLE IF NOT EXISTS expense_categories
                          (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                          user_id INTEGER,
-                          name TEXT,
-                          budget REAL,
-                          created_at TEXT)''')
+                          user_id INTEGER, name TEXT, budget REAL, created_at TEXT)''')
             
             c.execute('''CREATE TABLE IF NOT EXISTS expenses
                          (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                          user_id INTEGER,
-                          category_id INTEGER,
-                          amount REAL,
-                          currency TEXT DEFAULT 'VND',
-                          note TEXT,
-                          expense_date TEXT,
-                          created_at TEXT,
+                          user_id INTEGER, category_id INTEGER, amount REAL,
+                          currency TEXT DEFAULT 'VND', note TEXT,
+                          expense_date TEXT, created_at TEXT,
                           FOREIGN KEY (category_id) REFERENCES expense_categories(id))''')
             
             c.execute('''CREATE TABLE IF NOT EXISTS incomes
                          (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                          user_id INTEGER,
-                          amount REAL,
-                          currency TEXT DEFAULT 'VND',
-                          source TEXT,
-                          income_date TEXT,
-                          note TEXT,
-                          created_at TEXT)''')
-            # Bảng users để lưu thông tin
+                          user_id INTEGER, amount REAL, currency TEXT DEFAULT 'VND',
+                          source TEXT, income_date TEXT, note TEXT, created_at TEXT)''')
+            
             c.execute('''CREATE TABLE IF NOT EXISTS users
                          (user_id INTEGER PRIMARY KEY,
-                          username TEXT,
-                          first_name TEXT,
-                          last_name TEXT,
-                          last_seen TEXT)''')
+                          username TEXT, first_name TEXT, last_name TEXT, last_seen TEXT)''')
             
-            # Bảng permissions để phân quyền
             c.execute('''CREATE TABLE IF NOT EXISTS permissions
                          (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                          group_id INTEGER,
-                          admin_id INTEGER,
-                          granted_by INTEGER,
-                          can_view_all INTEGER DEFAULT 1,
-                          can_edit_all INTEGER DEFAULT 0,
-                          can_delete_all INTEGER DEFAULT 0,
-                          can_manage_perms INTEGER DEFAULT 0,
+                          group_id INTEGER, admin_id INTEGER, granted_by INTEGER,
+                          can_view_all INTEGER DEFAULT 1, can_edit_all INTEGER DEFAULT 0,
+                          can_delete_all INTEGER DEFAULT 0, can_manage_perms INTEGER DEFAULT 0,
                           created_at TEXT)''')
             
             conn.commit()
-            logger.info(f"✅ Database initialized at {DB_PATH}")
+            logger.info(f"✅ Database initialized")
             return True
         except Exception as e:
-            logger.error(f"❌ Lỗi khởi tạo database: {e}")
+            logger.error(f"❌ Lỗi database: {e}")
             return False
         finally:
             if conn:
@@ -249,7 +195,7 @@ try:
                 
             conn.commit()
         except Exception as e:
-            logger.error(f"❌ Lỗi khi migrate database: {e}")
+            logger.error(f"❌ Lỗi migrate: {e}")
         finally:
             if conn:
                 conn.close()
@@ -260,39 +206,8 @@ try:
                 timestamp = get_vn_time().strftime('%Y%m%d_%H%M%S')
                 backup_path = os.path.join(BACKUP_DIR, f'backup_{timestamp}.db')
                 shutil.copy2(DB_PATH, backup_path)
-                clean_old_backups()
         except Exception as e:
             logger.error(f"❌ Lỗi backup: {e}")
-
-    def clean_old_backups(days=7):
-        try:
-            now = time.time()
-            for f in os.listdir(BACKUP_DIR):
-                if f.startswith('backup_') and f.endswith('.db'):
-                    filepath = os.path.join(BACKUP_DIR, f)
-                    if os.path.getmtime(filepath) < now - days * 86400:
-                        os.remove(filepath)
-        except Exception as e:
-            logger.error(f"Lỗi clean old backups: {e}")
-
-    def clean_old_exports(hours=24):
-        try:
-            now = time.time()
-            for f in os.listdir(EXPORT_DIR):
-                if f.startswith('portfolio_') and f.endswith('.csv'):
-                    filepath = os.path.join(EXPORT_DIR, f)
-                    if os.path.getmtime(filepath) < now - hours * 3600:
-                        os.remove(filepath)
-        except Exception as e:
-            logger.error(f"Lỗi clean old exports: {e}")
-
-    def schedule_cleanup():
-        while True:
-            try:
-                clean_old_exports()
-                time.sleep(21600)
-            except:
-                time.sleep(3600)
 
     def schedule_backup():
         while True:
@@ -302,7 +217,7 @@ try:
             except:
                 time.sleep(3600)
 
-    # ==================== PORTFOLIO DATABASE FUNCTIONS ====================
+    # ==================== PORTFOLIO FUNCTIONS ====================
     def add_transaction(user_id, symbol, amount, buy_price):
         conn = None
         try:
@@ -319,7 +234,7 @@ try:
             conn.commit()
             return True
         except Exception as e:
-            logger.error(f"❌ Lỗi khi thêm transaction: {e}")
+            logger.error(f"❌ Lỗi thêm transaction: {e}")
             return False
         finally:
             if conn:
@@ -335,7 +250,7 @@ try:
                       (user_id,))
             return c.fetchall()
         except Exception as e:
-            logger.error(f"❌ Lỗi khi lấy portfolio: {e}")
+            logger.error(f"❌ Lỗi lấy portfolio: {e}")
             return []
         finally:
             if conn:
@@ -351,7 +266,7 @@ try:
                       (user_id,))
             return c.fetchall()
         except Exception as e:
-            logger.error(f"❌ Lỗi khi lấy transaction detail: {e}")
+            logger.error(f"❌ Lỗi lấy transaction: {e}")
             return []
         finally:
             if conn:
@@ -362,13 +277,12 @@ try:
         try:
             conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
-            c.execute('''DELETE FROM portfolio 
-                         WHERE id = ? AND user_id = ?''',
+            c.execute('''DELETE FROM portfolio WHERE id = ? AND user_id = ?''',
                       (transaction_id, user_id))
             conn.commit()
             return c.rowcount > 0
         except Exception as e:
-            logger.error(f"❌ Lỗi khi xóa transaction: {e}")
+            logger.error(f"❌ Lỗi xóa transaction: {e}")
             return False
         finally:
             if conn:
@@ -402,8 +316,7 @@ try:
             conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
             c.execute('''SELECT id, symbol, target_price, condition, created_at 
-                         FROM alerts 
-                         WHERE user_id = ? AND is_active = 1 
+                         FROM alerts WHERE user_id = ? AND is_active = 1 
                          ORDER BY created_at''', (user_id,))
             return c.fetchall()
         except Exception as e:
@@ -433,7 +346,6 @@ try:
         while True:
             try:
                 time.sleep(60)
-                
                 conn = sqlite3.connect(DB_PATH)
                 c = conn.cursor()
                 c.execute('''SELECT id, user_id, symbol, target_price, condition 
@@ -456,18 +368,15 @@ try:
                         should_trigger = True
                     
                     if should_trigger and app:
-                        msg = (
-                            f"🔔 *CẢNH BÁO GIÁ*\n━━━━━━━━━━━━━━━━\n\n"
-                            f"• Coin: *{symbol}*\n"
-                            f"• Giá hiện tại: `{fmt_price(current_price)}`\n"
-                            f"• Mốc cảnh báo: `{fmt_price(target_price)}`\n"
-                            f"• Điều kiện: {'📈 Lên trên' if condition == 'above' else '📉 Xuống dưới'}\n\n"
-                            f"🕐 {format_vn_time()}"
-                        )
+                        msg = (f"🔔 *CẢNH BÁO GIÁ*\n━━━━━━━━━━━━━━━━\n\n"
+                               f"• Coin: *{symbol}*\n"
+                               f"• Giá hiện: `{fmt_price(current_price)}`\n"
+                               f"• Mốc: `{fmt_price(target_price)}`\n"
+                               f"• Điều kiện: {'📈 Lên trên' if condition == 'above' else '📉 Xuống dưới'}\n\n"
+                               f"🕐 {format_vn_time()}")
                         
                         try:
                             app.bot.send_message(user_id, msg, parse_mode='Markdown')
-                            
                             conn = sqlite3.connect(DB_PATH)
                             c = conn.cursor()
                             c.execute('''UPDATE alerts SET is_active = 0, triggered_at = ? 
@@ -480,144 +389,135 @@ try:
             except Exception as e:
                 logger.error(f"❌ Lỗi check_alerts: {e}")
                 time.sleep(10)
-    
-        # ==================== PERMISSIONS FUNCTIONS ====================
-        def grant_permission(group_id, admin_id, granted_by, permissions):
-            """Cấp quyền cho admin"""
-            conn = None
-            try:
-                conn = sqlite3.connect(DB_PATH)
-                c = conn.cursor()
-                created_at = get_vn_time().strftime("%Y-%m-%d %H:%M:%S")
-                
-                # Xóa quyền cũ nếu có
-                c.execute("DELETE FROM permissions WHERE group_id = ? AND admin_id = ?", (group_id, admin_id))
-                
-                # Thêm quyền mới
-                c.execute('''INSERT INTO permissions 
-                             (group_id, admin_id, granted_by, can_view_all, can_edit_all, 
-                              can_delete_all, can_manage_perms, created_at)
-                             VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-                          (group_id, admin_id, granted_by,
-                           permissions.get('view', 1),
-                           permissions.get('edit', 0),
-                           permissions.get('delete', 0),
-                           permissions.get('manage', 0),
-                           created_at))
-                conn.commit()
-                return True
-            except Exception as e:
-                logger.error(f"❌ Lỗi cấp quyền: {e}")
+
+    # ==================== PERMISSIONS FUNCTIONS ====================
+    def grant_permission(group_id, admin_id, granted_by, permissions):
+        conn = None
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            created_at = get_vn_time().strftime("%Y-%m-%d %H:%M:%S")
+            
+            c.execute("DELETE FROM permissions WHERE group_id = ? AND admin_id = ?", (group_id, admin_id))
+            
+            c.execute('''INSERT INTO permissions 
+                         (group_id, admin_id, granted_by, can_view_all, can_edit_all, 
+                          can_delete_all, can_manage_perms, created_at)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                      (group_id, admin_id, granted_by,
+                       permissions.get('view', 1),
+                       permissions.get('edit', 0),
+                       permissions.get('delete', 0),
+                       permissions.get('manage', 0),
+                       created_at))
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"❌ Lỗi cấp quyền: {e}")
+            return False
+        finally:
+            if conn:
+                conn.close()
+
+    def revoke_permission(group_id, admin_id):
+        conn = None
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("DELETE FROM permissions WHERE group_id = ? AND admin_id = ?", (group_id, admin_id))
+            conn.commit()
+            return c.rowcount > 0
+        except Exception as e:
+            logger.error(f"❌ Lỗi thu hồi quyền: {e}")
+            return False
+        finally:
+            if conn:
+                conn.close()
+
+    def check_permission(group_id, user_id, permission_type='view'):
+        conn = None
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute('''SELECT can_view_all, can_edit_all, can_delete_all, can_manage_perms 
+                         FROM permissions WHERE group_id = ? AND admin_id = ?''',
+                      (group_id, user_id))
+            result = c.fetchone()
+            
+            if not result:
                 return False
-            finally:
-                if conn:
-                    conn.close()
-    
-        def revoke_permission(group_id, admin_id):
-            """Thu hồi quyền"""
-            conn = None
-            try:
-                conn = sqlite3.connect(DB_PATH)
-                c = conn.cursor()
-                c.execute("DELETE FROM permissions WHERE group_id = ? AND admin_id = ?", (group_id, admin_id))
-                conn.commit()
-                return c.rowcount > 0
-            except Exception as e:
-                logger.error(f"❌ Lỗi thu hồi quyền: {e}")
-                return False
-            finally:
-                if conn:
-                    conn.close()
-    
-        def check_permission(group_id, user_id, permission_type='view'):
-            """Kiểm tra quyền của user"""
-            conn = None
-            try:
-                conn = sqlite3.connect(DB_PATH)
-                c = conn.cursor()
-                c.execute('''SELECT can_view_all, can_edit_all, can_delete_all, can_manage_perms 
-                             FROM permissions WHERE group_id = ? AND admin_id = ?''',
-                          (group_id, user_id))
-                result = c.fetchone()
-                
-                if not result:
-                    return False
-                
-                can_view, can_edit, can_delete, can_manage = result
-                
-                if permission_type == 'view':
-                    return can_view == 1
-                elif permission_type == 'edit':
-                    return can_edit == 1
-                elif permission_type == 'delete':
-                    return can_delete == 1
-                elif permission_type == 'manage':
-                    return can_manage == 1
-                return False
-            except Exception as e:
-                logger.error(f"❌ Lỗi kiểm tra quyền: {e}")
-                return False
-            finally:
-                if conn:
-                    conn.close()
-    
-        def get_all_admins(group_id):
-            """Lấy danh sách admin trong nhóm"""
-            conn = None
-            try:
-                conn = sqlite3.connect(DB_PATH)
-                c = conn.cursor()
-                c.execute('''SELECT p.admin_id, p.can_view_all, p.can_edit_all, p.can_delete_all, 
-                                    p.can_manage_perms
-                             FROM permissions p
-                             WHERE p.group_id = ?
-                             ORDER BY p.created_at''', (group_id,))
-                return c.fetchall()
-            except Exception as e:
-                logger.error(f"❌ Lỗi lấy danh sách admin: {e}")
-                return []
-            finally:
-                if conn:
-                    conn.close()
-    
-        # ==================== USER FUNCTIONS ====================
-        def update_user_info(user):
-            """Cập nhật thông tin user"""
-            conn = None
-            try:
-                conn = sqlite3.connect(DB_PATH)
-                c = conn.cursor()
-                c.execute('''INSERT OR REPLACE INTO users 
-                             (user_id, username, first_name, last_name, last_seen)
-                             VALUES (?, ?, ?, ?, ?)''',
-                          (user.id, user.username, user.first_name, user.last_name,
-                           get_vn_time().strftime("%Y-%m-%d %H:%M:%S")))
-                conn.commit()
-                logger.info(f"✅ Đã cập nhật user {user.id} - {user.username}")
-                return True
-            except Exception as e:
-                logger.error(f"❌ Lỗi cập nhật user: {e}")
-                return False
-            finally:
-                if conn:
-                    conn.close()
-    
-        def get_user_id_by_username(username):
-            """Lấy user_id từ username"""
-            conn = None
-            try:
-                conn = sqlite3.connect(DB_PATH)
-                c = conn.cursor()
-                c.execute("SELECT user_id FROM users WHERE username = ?", (username,))
-                result = c.fetchone()
-                return result[0] if result else None
-            except Exception as e:
-                logger.error(f"❌ Lỗi tìm user: {e}")
-                return None
-            finally:
-                if conn:
-                    conn.close()
-    
+            
+            can_view, can_edit, can_delete, can_manage = result
+            
+            if permission_type == 'view':
+                return can_view == 1
+            elif permission_type == 'edit':
+                return can_edit == 1
+            elif permission_type == 'delete':
+                return can_delete == 1
+            elif permission_type == 'manage':
+                return can_manage == 1
+            return False
+        except Exception as e:
+            logger.error(f"❌ Lỗi kiểm tra quyền: {e}")
+            return False
+        finally:
+            if conn:
+                conn.close()
+
+    def get_all_admins(group_id):
+        conn = None
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute('''SELECT p.admin_id, p.can_view_all, p.can_edit_all, p.can_delete_all, 
+                                p.can_manage_perms
+                         FROM permissions p
+                         WHERE p.group_id = ?
+                         ORDER BY p.created_at''', (group_id,))
+            return c.fetchall()
+        except Exception as e:
+            logger.error(f"❌ Lỗi lấy danh sách admin: {e}")
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+    # ==================== USER FUNCTIONS ====================
+    def update_user_info(user):
+        conn = None
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute('''INSERT OR REPLACE INTO users 
+                         (user_id, username, first_name, last_name, last_seen)
+                         VALUES (?, ?, ?, ?, ?)''',
+                      (user.id, user.username, user.first_name, user.last_name,
+                       get_vn_time().strftime("%Y-%m-%d %H:%M:%S")))
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"❌ Lỗi cập nhật user: {e}")
+            return False
+        finally:
+            if conn:
+                conn.close()
+
+    def get_user_id_by_username(username):
+        conn = None
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("SELECT user_id FROM users WHERE username = ?", (username,))
+            result = c.fetchone()
+            return result[0] if result else None
+        except Exception as e:
+            logger.error(f"❌ Lỗi tìm user: {e}")
+            return None
+        finally:
+            if conn:
+                conn.close()
+
     # ==================== HÀM LẤY GIÁ COIN ====================
     def get_price(symbol):
         try:
@@ -644,9 +544,9 @@ try:
                 quote_data = coin_data['quote']['USD']
                 
                 return {
-                    'p': quote_data['price'], 
-                    'v': quote_data['volume_24h'], 
-                    'c': quote_data['percent_change_24h'], 
+                    'p': quote_data['price'],
+                    'v': quote_data['volume_24h'],
+                    'c': quote_data['percent_change_24h'],
                     'm': quote_data['market_cap'],
                     'n': coin_data['name'],
                     'r': coin_data.get('cmc_rank', 'N/A')
@@ -707,7 +607,7 @@ try:
                 return f"${p:.4f}"
             else:
                 return f"${p:,.2f}"
-        except: 
+        except:
             return f"${p}"
 
     def fmt_vnd(p):
@@ -728,7 +628,7 @@ try:
                 return f"${v/1e3:.2f}K"
             else:
                 return f"${v:,.2f}"
-        except: 
+        except:
             return str(v)
 
     def fmt_percent(c):
@@ -757,11 +657,14 @@ try:
             return f"{amount} {currency}"
 
     SUPPORTED_CURRENCIES = {
-        'VND': '🇻🇳 Việt Nam Đồng', 'USD': '🇺🇸 US Dollar', 'USDT': '💵 Tether',
-        'KHR': '🇰🇭 Riel Campuchia', 'LKR': '🇱🇰 Sri Lanka Rupee'
+        'VND': '🇻🇳 Việt Nam Đồng',
+        'USD': '🇺🇸 US Dollar',
+        'USDT': '💵 Tether',
+        'KHR': '🇰🇭 Riel Campuchia',
+        'LKR': '🇱🇰 Sri Lanka Rupee'
     }
 
-    # ==================== EXPENSE DATABASE FUNCTIONS ====================
+    # ==================== EXPENSE FUNCTIONS ====================
     def add_expense_category(user_id, name, budget=0):
         conn = None
         try:
@@ -848,8 +751,7 @@ try:
             conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
             c.execute('''SELECT id, amount, source, note, income_date, currency
-                         FROM incomes 
-                         WHERE user_id = ?
+                         FROM incomes WHERE user_id = ?
                          ORDER BY income_date DESC, created_at DESC
                          LIMIT ?''', (user_id, limit))
             return c.fetchall()
@@ -859,7 +761,7 @@ try:
         finally:
             if conn:
                 conn.close()
-    
+
     def get_recent_expenses(user_id, limit=10):
         conn = None
         try:
@@ -889,28 +791,24 @@ try:
             if period == 'day':
                 date_filter = now.strftime("%Y-%m-%d")
                 query = '''SELECT id, amount, source, note, currency, income_date
-                          FROM incomes 
-                          WHERE user_id = ? AND income_date = ?
+                          FROM incomes WHERE user_id = ? AND income_date = ?
                           ORDER BY income_date DESC, created_at DESC'''
                 c.execute(query, (user_id, date_filter))
             elif period == 'month':
                 month_filter = now.strftime("%Y-%m")
                 query = '''SELECT id, amount, source, note, currency, income_date
-                          FROM incomes 
-                          WHERE user_id = ? AND strftime('%Y-%m', income_date) = ?
+                          FROM incomes WHERE user_id = ? AND strftime('%Y-%m', income_date) = ?
                           ORDER BY income_date DESC, created_at DESC'''
                 c.execute(query, (user_id, month_filter))
-            else:  # year
+            else:
                 year_filter = now.strftime("%Y")
                 query = '''SELECT id, amount, source, note, currency, income_date
-                          FROM incomes 
-                          WHERE user_id = ? AND strftime('%Y', income_date) = ?
+                          FROM incomes WHERE user_id = ? AND strftime('%Y', income_date) = ?
                           ORDER BY income_date DESC, created_at DESC'''
                 c.execute(query, (user_id, year_filter))
             
             rows = c.fetchall()
             
-            # Tính tổng theo từng loại tiền
             summary = {}
             for row in rows:
                 id, amount, source, note, currency, date = row
@@ -953,7 +851,7 @@ try:
                           WHERE e.user_id = ? AND strftime('%Y-%m', e.expense_date) = ?
                           ORDER BY e.expense_date DESC, e.created_at DESC'''
                 c.execute(query, (user_id, month_filter))
-            else:  # year
+            else:
                 year_filter = now.strftime("%Y")
                 query = '''SELECT e.id, ec.name, e.amount, e.note, e.currency, e.expense_date, ec.budget
                           FROM expenses e
@@ -964,18 +862,15 @@ try:
             
             rows = c.fetchall()
             
-            # Tính tổng theo từng loại tiền
             summary = {}
             category_summary = {}
             
             for row in rows:
                 id, cat_name, amount, note, currency, date, budget = row
-                # Tổng theo loại tiền
                 if currency not in summary:
                     summary[currency] = 0
                 summary[currency] += amount
                 
-                # Tổng theo danh mục
                 key = f"{cat_name}_{currency}"
                 if key not in category_summary:
                     category_summary[key] = {
@@ -1056,13 +951,12 @@ try:
             [InlineKeyboardButton("➕ Mua coin", callback_data="show_buy")]
         ]
         
-        # THÊM TAB ADMIN NẾU CÓ QUYỀN
         if group_id and user_id:
             try:
                 if check_permission(group_id, user_id, 'view'):
                     keyboard.append([InlineKeyboardButton("👑 ADMIN", callback_data="admin_panel")])
             except:
-                pass  # Bỏ qua lỗi kiểm tra quyền
+                pass
         
         return InlineKeyboardMarkup(keyboard)
 
@@ -1082,7 +976,6 @@ try:
 
     # ==================== COMMAND HANDLERS ====================
     async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        # Kiểm tra nếu là trong nhóm
         if update.effective_chat.type in ['group', 'supergroup']:
             welcome_msg = (
                 "🚀 *ĐẦU TƯ COIN & QUẢN LÝ CHI TIÊU*\n\n"
@@ -1091,9 +984,8 @@ try:
                 "• `/s btc eth` - Xem giá coin\n"
                 "• `/usdt` - Tỷ giá USDT/VND\n"
                 "• `/buy btc 0.5 40000` - Mua coin\n"
-                "• `/sell btc 0.2` - Bán coin\n"
-                "• Và nhiều lệnh khác...\n\n"
-                "📱 *Trên điện thoại:* Vuốt xuống dưới để hiện menu\n"
+                "• `/sell btc 0.2` - Bán coin\n\n"
+                "📱 *Vuốt xuống để hiện menu*\n"
                 f"🕐 {format_vn_time()}"
             )
             await update.message.reply_text(welcome_msg, parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_keyboard())
@@ -1102,30 +994,21 @@ try:
                 "🚀 *ĐẦU TƯ COIN & QUẢN LÝ CHI TIÊU*\n\n"
                 "🤖 Bot hỗ trợ:\n\n"
                 "*💎 ĐẦU TƯ COIN:*\n"
-                "• Xem giá bất kỳ coin nào\n"
-                "• Top 10 coin\n"
-                "• Quản lý danh mục đầu tư\n"
-                "• Tính lợi nhuận chi tiết\n"
-                "• Cảnh báo giá\n\n"
+                "• Xem giá coin\n• Top 10 coin\n• Quản lý danh mục\n• Tính lợi nhuận\n• Cảnh báo giá\n\n"
                 "*💰 QUẢN LÝ CHI TIÊU:*\n"
-                "• Ghi chép thu nhập/chi tiêu\n"
-                "• Hỗ trợ đa tiền tệ\n"
-                "• Quản lý ngân sách theo danh mục\n"
-                "• Báo cáo theo ngày/tháng/năm\n\n"
-                "📱 *Trên điện thoại:* Vuốt xuống dưới để hiện menu\n"
+                "• Ghi chép thu/chi\n• Đa tiền tệ\n• Quản lý ngân sách\n• Báo cáo ngày/tháng/năm\n\n"
                 f"🕐 *Hiện tại:* `{format_vn_time()}`\n\n"
                 "👇 *Chọn chức năng bên dưới*"
             )
             await update.message.reply_text(welcome_msg, parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_keyboard())
-    
+
     async def menu_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        """Hiện lại menu chính"""
         await update.message.reply_text(
             "👇 *Chọn chức năng bên dưới*",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=get_main_keyboard()
         )
-    
+
     async def help_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
         chat_id = update.effective_chat.id
@@ -1142,19 +1025,17 @@ try:
             "• `/del [id]` - Xóa giao dịch\n"
             "• `/alert BTC above 50000` - Cảnh báo giá\n"
             "• `/alerts` - Xem cảnh báo\n"
-            "• `/stats` - Thống kê danh mục\n\n"
+            "• `/stats` - Thống kê\n\n"
             "*QUẢN LÝ CHI TIÊU:*\n"
             "• `tn 500000` - Thêm thu nhập\n"
-            "• `dm Ăn uống 3000000` - Tạo danh mục\n"
+            "• `dm Ăn uống` - Tạo danh mục\n"
             "• `ct 1 50000 VND Ăn trưa` - Chi tiêu\n"
-            "• `ds` - Xem giao dịch gần đây\n"
-            "• `bc` - Báo cáo tháng này\n"
-            "• `xoa chi 5` - Xóa khoản chi\n"
-            "• `xoa thu 3` - Xóa khoản thu\n"
+            "• `ds` - Xem gần đây\n"
+            "• `bc` - Báo cáo tháng\n"
+            "• `xoa chi 5` - Xóa chi\n"
+            "• `xoa thu 3` - Xóa thu\n"
         )
         
-        # >>> THÊM PHẦN NÀY <<<
-        # THÊM TAB ADMIN NẾU CÓ QUYỀN
         if chat_type in ['group', 'supergroup'] and check_permission(chat_id, user_id, 'view'):
             help_msg += "\n*👑 QUẢN TRỊ:*\n"
             help_msg += "• `/perm list` - Danh sách admin\n"
@@ -1166,8 +1047,7 @@ try:
         
         help_msg += f"\n🕐 {format_vn_time()}"
         await update.message.reply_text(help_msg, parse_mode=ParseMode.MARKDOWN)
-    
-    
+
     @rate_limit(30)
     async def usdt_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         msg = await update.message.reply_text("🔄 Đang tra cứu...")
@@ -1187,8 +1067,7 @@ try:
         
         await msg.delete()
         await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
-    
-    
+
     @rate_limit(30)
     async def s_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not ctx.args:
@@ -1213,8 +1092,7 @@ try:
         
         await msg.delete()
         await update.message.reply_text("\n━━━━━━━━━━━━\n".join(results) + f"\n\n🕐 {format_vn_time_short()}", parse_mode='Markdown')
-    
-    
+
     @rate_limit(30)
     async def buy_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         uid = update.effective_user.id
@@ -1253,8 +1131,7 @@ try:
             await update.message.reply_text(msg, parse_mode='Markdown')
         else:
             await update.message.reply_text(f"❌ Lỗi khi thêm giao dịch *{symbol}*", parse_mode='Markdown')
-    
-    
+
     @rate_limit(30)
     async def sell_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         uid = update.effective_user.id
@@ -1337,8 +1214,7 @@ try:
             f"🕐 {format_vn_time()}"
         )
         await update.message.reply_text(msg, parse_mode='Markdown')
-    
-    
+
     @rate_limit(30)
     async def edit_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         uid = update.effective_user.id
@@ -1449,8 +1325,7 @@ try:
                 await update.message.reply_text("❌ /edit [id] [sl] [giá]")
         else:
             await update.message.reply_text("❌ /edit - Xem DS\n/edit [id] - Xem chi tiết\n/edit [id] [sl] [giá] - Sửa")
-    
-    
+
     @rate_limit(30)
     async def delete_tx_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         uid = update.effective_user.id
@@ -1474,8 +1349,7 @@ try:
             )
         except ValueError:
             await update.message.reply_text("❌ ID không hợp lệ")
-    
-    
+
     @rate_limit(30)
     async def alert_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if len(ctx.args) < 3:
@@ -1510,8 +1384,7 @@ try:
             await update.message.reply_text(msg, parse_mode='Markdown')
         else:
             await update.message.reply_text("❌ Lỗi khi tạo cảnh báo!")
-    
-    
+
     @rate_limit(30)
     async def alerts_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         uid = update.effective_user.id
@@ -1533,8 +1406,7 @@ try:
         
         msg += f"🕐 {format_vn_time_short()}"
         await update.message.reply_text(msg, parse_mode='Markdown')
-    
-    
+
     @rate_limit(30)
     async def stats_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         uid = update.effective_user.id
@@ -1582,19 +1454,17 @@ try:
         stats_msg += f"\n🕐 {format_vn_time()}"
         
         await msg.edit_text(stats_msg, parse_mode=ParseMode.MARKDOWN)
+
     # ==================== PERMISSION COMMAND ====================
     async def perm_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        """Quản lý phân quyền admin"""
         user_id = update.effective_user.id
         chat_id = update.effective_chat.id
         chat_type = update.effective_chat.type
         
-        # Chỉ hoạt động trong nhóm
         if chat_type not in ['group', 'supergroup']:
             await update.message.reply_text("❌ Lệnh này chỉ dùng trong nhóm!")
             return
         
-        # Kiểm tra người dùng có quyền quản lý không
         if not check_permission(chat_id, user_id, 'manage'):
             await update.message.reply_text("❌ Bạn không có quyền quản lý phân quyền!")
             return
@@ -1639,7 +1509,6 @@ try:
             target = ctx.args[1]
             perm_type = ctx.args[2].lower()
             
-            # Lấy user_id từ username
             if target.startswith('@'):
                 username = target[1:]
                 target_id = get_user_id_by_username(username)
@@ -1700,131 +1569,11 @@ try:
             else:
                 await update.message.reply_text("❌ Không tìm thấy quyền!")
 
-        # ==================== PERMISSION COMMAND ====================
-        async def perm_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-            """Quản lý phân quyền admin"""
-            user_id = update.effective_user.id
-            chat_id = update.effective_chat.id
-            chat_type = update.effective_chat.type
-            
-            # Chỉ hoạt động trong nhóm
-            if chat_type not in ['group', 'supergroup']:
-                await update.message.reply_text("❌ Lệnh này chỉ dùng trong nhóm!")
-                return
-            
-            # Kiểm tra người dùng có quyền quản lý không
-            if not check_permission(chat_id, user_id, 'manage'):
-                await update.message.reply_text("❌ Bạn không có quyền quản lý phân quyền!")
-                return
-            
-            if not ctx.args:
-                msg = (
-                    "🔐 *QUẢN LÝ PHÂN QUYỀN*\n━━━━━━━━━━━━━━━━\n\n"
-                    "*Các lệnh:*\n"
-                    "• `/perm list` - Xem danh sách admin\n"
-                    "• `/perm grant @user view` - Cấp quyền xem\n"
-                    "• `/perm grant @user edit` - Cấp quyền sửa\n"
-                    "• `/perm grant @user delete` - Cấp quyền xóa\n"
-                    "• `/perm grant @user manage` - Cấp quyền quản lý\n"
-                    "• `/perm grant @user full` - Cấp toàn quyền\n"
-                    "• `/perm revoke @user` - Thu hồi quyền\n\n"
-                    f"🕐 {format_vn_time_short()}"
-                )
-                await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
-                return
-            
-            if ctx.args[0] == "list":
-                admins = get_all_admins(chat_id)
-                if not admins:
-                    await update.message.reply_text("📭 Chưa có admin nào được cấp quyền!")
-                    return
-                
-                msg = "👑 *DANH SÁCH ADMIN*\n━━━━━━━━━━━━━━━━\n\n"
-                for admin in admins:
-                    admin_id, view, edit, delete, manage = admin
-                    permissions = []
-                    if view: permissions.append("👁 Xem")
-                    if edit: permissions.append("✏️ Sửa")
-                    if delete: permissions.append("🗑 Xóa")
-                    if manage: permissions.append("🔐 Quản lý")
-                    
-                    msg += f"• `{admin_id}`: {', '.join(permissions)}\n"
-                
-                msg += f"\n🕐 {format_vn_time_short()}"
-                await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
-            
-            elif ctx.args[0] == "grant" and len(ctx.args) >= 3:
-                target = ctx.args[1]
-                perm_type = ctx.args[2].lower()
-                
-                # Lấy user_id từ username
-                if target.startswith('@'):
-                    username = target[1:]
-                    target_id = get_user_id_by_username(username)
-                    if not target_id:
-                        await update.message.reply_text(f"❌ Không tìm thấy user {target}")
-                        return
-                else:
-                    try:
-                        target_id = int(target)
-                    except:
-                        await update.message.reply_text("❌ ID không hợp lệ!")
-                        return
-                
-                permissions = {'view': 0, 'edit': 0, 'delete': 0, 'manage': 0}
-                
-                if perm_type == 'view':
-                    permissions['view'] = 1
-                elif perm_type == 'edit':
-                    permissions['view'] = 1
-                    permissions['edit'] = 1
-                elif perm_type == 'delete':
-                    permissions['view'] = 1
-                    permissions['delete'] = 1
-                elif perm_type == 'manage':
-                    permissions['manage'] = 1
-                elif perm_type == 'full':
-                    permissions['view'] = 1
-                    permissions['edit'] = 1
-                    permissions['delete'] = 1
-                    permissions['manage'] = 1
-                else:
-                    await update.message.reply_text("❌ Loại quyền không hợp lệ!")
-                    return
-                
-                if grant_permission(chat_id, target_id, user_id, permissions):
-                    await update.message.reply_text(f"✅ Đã cấp quyền {perm_type} cho {target}")
-                else:
-                    await update.message.reply_text("❌ Lỗi khi cấp quyền!")
-            
-            elif ctx.args[0] == "revoke" and len(ctx.args) >= 2:
-                target = ctx.args[1]
-                
-                if target.startswith('@'):
-                    username = target[1:]
-                    target_id = get_user_id_by_username(username)
-                    if not target_id:
-                        await update.message.reply_text(f"❌ Không tìm thấy user {target}")
-                        return
-                else:
-                    try:
-                        target_id = int(target)
-                    except:
-                        await update.message.reply_text("❌ ID không hợp lệ!")
-                        return
-                
-                if revoke_permission(chat_id, target_id):
-                    await update.message.reply_text(f"✅ Đã thu hồi quyền của {target}")
-                else:
-                    await update.message.reply_text("❌ Không tìm thấy quyền!")
-    
     # ==================== EXPENSE SHORTCUT HANDLERS ====================
-    
     async def expense_shortcut_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         text = update.message.text.strip()
         user_id = update.effective_user.id
         
-        # THU NHẬP
         if text.startswith('tn '):
             parts = text.split()
             if len(parts) < 2:
@@ -1865,7 +1614,6 @@ try:
             except ValueError:
                 await update.message.reply_text("❌ Số tiền không hợp lệ!")
         
-        # DANH MỤC
         elif text.startswith('dm '):
             parts = text.split()
             if len(parts) < 2:
@@ -1892,7 +1640,6 @@ try:
             else:
                 await update.message.reply_text("❌ Lỗi khi thêm danh mục!")
         
-        # CHI TIÊU
         elif text.startswith('ct '):
             parts = text.split()
             if len(parts) < 3:
@@ -1943,7 +1690,6 @@ try:
             except ValueError:
                 await update.message.reply_text("❌ ID hoặc số tiền không hợp lệ!")
         
-        # XEM GẦN ĐÂY
         elif text == 'ds':
             recent_incomes = get_recent_incomes(user_id, 5)
             recent_expenses = get_recent_expenses(user_id, 5)
@@ -1970,49 +1716,39 @@ try:
             msg += f"\n🕐 {format_vn_time()}"
             await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
         
-        # BÁO CÁO NHANH
         elif text == 'bc':
             incomes_data = get_income_by_period(user_id, 'month')
             expenses_data = get_expenses_by_period(user_id, 'month')
             
             msg = f"📊 *BÁO CÁO THÁNG {get_vn_time().strftime('%m/%Y')}*\n━━━━━━━━━━━━━━━━\n\n"
             
-            # HIỂN THỊ THU NHẬP
             if incomes_data['transactions']:
                 msg += "*💰 THU NHẬP:*\n"
-                # Hiển thị 5 khoản thu gần nhất
                 for inc in incomes_data['transactions'][:5]:
                     id, amount, source, note, currency, date = inc
                     msg += f"• #{id} {date}: {format_currency_simple(amount, currency)} - {source}\n"
                     if note:
                         msg += f"  📝 {note}\n"
                 
-                # Hiển thị tổng theo loại tiền
                 msg += f"\n📊 *Tổng thu theo loại tiền:*\n"
                 for currency, total in incomes_data['summary'].items():
                     msg += f"  {format_currency_simple(total, currency)}\n"
-                
-                # Tổng số giao dịch
                 msg += f"  *Tổng số:* {incomes_data['total_count']} giao dịch\n\n"
             else:
                 msg += "📭 Chưa có thu nhập trong tháng này.\n\n"
             
-            # HIỂN THỊ CHI TIÊU
             if expenses_data['transactions']:
                 msg += "*💸 CHI TIÊU:*\n"
-                # Hiển thị 5 khoản chi gần nhất
                 for exp in expenses_data['transactions'][:5]:
                     id, cat_name, amount, note, currency, date, budget = exp
                     msg += f"• #{id} {date}: {format_currency_simple(amount, currency)} - {cat_name}\n"
                     if note:
                         msg += f"  📝 {note}\n"
                 
-                # Hiển thị tổng theo loại tiền
                 msg += f"\n📊 *Tổng chi theo loại tiền:*\n"
                 for currency, total in expenses_data['summary'].items():
                     msg += f"  {format_currency_simple(total, currency)}\n"
                 
-                # Hiển thị chi tiêu theo danh mục
                 msg += f"\n📋 *Chi tiêu theo danh mục:*\n"
                 for key, data in expenses_data['category_summary'].items():
                     budget_status = ""
@@ -2030,7 +1766,6 @@ try:
             else:
                 msg += "📭 Chưa có chi tiêu trong tháng này."
             
-            # TÍNH TOÁN CÂN ĐỐI (nếu cùng loại tiền)
             msg += f"\n\n*⚖️ CÂN ĐỐI THEO LOẠI TIỀN:*\n"
             all_currencies = set(list(incomes_data['summary'].keys()) + list(expenses_data['summary'].keys()))
             
@@ -2050,7 +1785,6 @@ try:
             msg += f"\n🕐 {format_vn_time()}"
             await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
         
-        # XÓA CHI TIÊU
         elif text.startswith('xoa chi '):
             parts = text.split()
             if len(parts) < 3:
@@ -2066,7 +1800,6 @@ try:
             except ValueError:
                 await update.message.reply_text("❌ ID không hợp lệ!")
         
-        # XÓA THU NHẬP
         elif text.startswith('xoa thu '):
             parts = text.split()
             if len(parts) < 3:
@@ -2084,7 +1817,6 @@ try:
 
     # ==================== HANDLE MESSAGE ====================
     async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        # Cập nhật thông tin user
         if update.effective_user:
             update_user_info(update.effective_user)
         
@@ -2093,7 +1825,6 @@ try:
         text = update.message.text.strip()
         chat_type = update.effective_chat.type
         
-        # KIỂM TRA NẾU LÀ PHÉP TÍNH (hoạt động cả nhóm và chat riêng)
         if re.search(r'[\+\-\*\/]', text) and re.match(r'^[\d\s\+\-\*\/\.\(\)]+$', text):
             try:
                 result = eval(text, {"__builtins__": {}}, {})
@@ -2107,12 +1838,10 @@ try:
             except:
                 return
         
-        # Xử lý các lệnh tắt chi tiêu (chỉ trong chat riêng)
         if chat_type == 'private' and text.startswith(('tn ', 'dm ', 'ct ', 'ds', 'bc', 'xoa chi ', 'xoa thu ')):
             await expense_shortcut_handler(update, ctx)
             return
         
-        # XỬ LÝ MENU CHÍNH
         if text == "💰 ĐẦU TƯ COIN":
             await update.message.reply_text(
                 f"💰 *MENU ĐẦU TƯ COIN*\n━━━━━━━━━━━━━━━━\n\n🕐 {format_vn_time()}",
@@ -2127,18 +1856,16 @@ try:
             )
         elif text == "❓ HƯỚNG DẪN":
             await help_command(update, ctx)
-        # KHÔNG CÓ ELSE - im lặng với tin nhắn khác
 
     # ==================== CALLBACK HANDLER ====================
     async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
-        logger.info(f"Callback từ user {update.effective_user.id} trong chat {update.effective_chat.type}: {query.data}")
+        logger.info(f"Callback: {query.data}")
         
         data = query.data
         
         try:
-            # MENU CHÍNH
             if data == "back_to_main":
                 await query.edit_message_text(
                     f"💰 *MENU CHÍNH*\n━━━━━━━━━━━━━━━━\n\n🕐 {format_vn_time()}",
@@ -2147,7 +1874,6 @@ try:
                 )
                 await query.message.reply_text("👇 Chọn chức năng:", reply_markup=get_main_keyboard())
             
-            # ĐẦU TƯ
             elif data == "back_to_invest":
                 uid = query.from_user.id
                 gid = query.message.chat.id
@@ -2534,7 +2260,6 @@ try:
                         )
                     os.remove(filepath)
                     
-                    # Quay lại menu đầu tư
                     await query.edit_message_text(
                         f"💰 *MENU ĐẦU TƯ COIN*\n━━━━━━━━━━━━━━━━\n\n🕐 {format_vn_time()}",
                         parse_mode=ParseMode.MARKDOWN,
@@ -2543,16 +2268,10 @@ try:
                 except Exception as e:
                     logger.error(f"Lỗi export: {e}")
                     await query.edit_message_text("❌ Lỗi khi gửi file!")
-                    
-            # ==================== ADMIN PANEL ====================
+            
             elif data == "admin_panel":
                 uid = query.from_user.id
                 group_id = query.message.chat.id
-                
-                # Tạm thời bỏ qua kiểm tra quyền để test
-                # if not check_permission(group_id, uid, 'view'):
-                #     await query.edit_message_text("❌ Bạn không có quyền truy cập!")
-                #     return
                 
                 msg = (
                     "👑 *ADMIN PANEL*\n━━━━━━━━━━━━━━━━\n\n"
@@ -2567,8 +2286,7 @@ try:
                 
                 keyboard = [[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
                 await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
-                
-            # QUẢN LÝ CHI TIÊU
+            
             elif data == "back_to_expense":
                 await query.edit_message_text(
                     f"💰 *QUẢN LÝ CHI TIÊU*\n━━━━━━━━━━━━━━━━\n\n🕐 {format_vn_time()}",
@@ -2657,7 +2375,6 @@ try:
                     
                     msg = f"📅 *HÔM NAY ({get_vn_time().strftime('%d/%m/%Y')})*\n━━━━━━━━━━━━━━━━\n\n"
                     
-                    # HIỂN THỊ THU NHẬP
                     if incomes_data['transactions']:
                         msg += "*💰 THU NHẬP:*\n"
                         for inc in incomes_data['transactions']:
@@ -2673,7 +2390,6 @@ try:
                     else:
                         msg += "📭 Không có thu nhập hôm nay.\n\n"
                     
-                    # HIỂN THỊ CHI TIÊU
                     if expenses_data['transactions']:
                         msg += "*💸 CHI TIÊU:*\n"
                         for exp in expenses_data['transactions']:
@@ -2710,10 +2426,8 @@ try:
                     
                     msg = f"📅 *THÁNG {get_vn_time().strftime('%m/%Y')}*\n━━━━━━━━━━━━━━━━\n\n"
                     
-                    # HIỂN THỊ THU NHẬP
                     if incomes_data['transactions']:
                         msg += "*💰 THU NHẬP:*\n"
-                        # Hiển thị 10 khoản thu gần nhất
                         for inc in incomes_data['transactions'][:10]:
                             id, amount, source, note, currency, date = inc
                             msg += f"• #{id} {date}: {format_currency_simple(amount, currency)} - {source}\n"
@@ -2727,10 +2441,8 @@ try:
                     else:
                         msg += "📭 Không có thu nhập trong tháng này.\n\n"
                     
-                    # HIỂN THỊ CHI TIÊU
                     if expenses_data['transactions']:
                         msg += "*💸 CHI TIÊU:*\n"
-                        # Hiển thị 10 khoản chi gần nhất
                         for exp in expenses_data['transactions'][:10]:
                             id, cat_name, amount, note, currency, date, budget = exp
                             msg += f"• #{id} {date}: {format_currency_simple(amount, currency)} - {cat_name}\n"
@@ -2741,7 +2453,6 @@ try:
                         for currency, total in expenses_data['summary'].items():
                             msg += f"  {format_currency_simple(total, currency)}\n"
                         
-                        # Hiển thị chi tiêu theo danh mục
                         msg += f"\n📋 *Chi tiêu theo danh mục:*\n"
                         for key, data in expenses_data['category_summary'].items():
                             budget_status = ""
@@ -2759,7 +2470,6 @@ try:
                     else:
                         msg += "📭 Không có chi tiêu trong tháng này."
                     
-                    # CÂN ĐỐI THU CHI
                     msg += f"\n\n*⚖️ CÂN ĐỐI THU CHI:*\n"
                     all_currencies = set(list(incomes_data['summary'].keys()) + list(expenses_data['summary'].keys()))
                     
@@ -2805,7 +2515,6 @@ try:
                     
                     msg = "🔄 *20 GIAO DỊCH GẦN ĐÂY*\n━━━━━━━━━━━━━━━━\n\n"
                     
-                    # Kết hợp và sắp xếp theo thời gian
                     all_transactions = []
                     
                     for inc in recent_incomes:
@@ -2816,7 +2525,6 @@ try:
                         id, cat_name, amount, note, date, currency = exp
                         all_transactions.append(('💸', id, date, f"{format_currency_simple(amount, currency)} - {cat_name}", note))
                     
-                    # Sắp xếp theo ngày giảm dần
                     all_transactions.sort(key=lambda x: x[2], reverse=True)
                     
                     for emoji, id, date, desc, note in all_transactions[:20]:
@@ -2964,7 +2672,6 @@ try:
                 logger.error(f"❌ Lỗi tạo Application: {e}")
                 raise
             
-            # Đăng ký handlers
             app.add_handler(CommandHandler("start", start))
             app.add_handler(CommandHandler("help", help_command))
             app.add_handler(CommandHandler("menu", menu_command))
@@ -2976,7 +2683,6 @@ try:
             app.add_handler(CommandHandler("del", delete_tx_command))
             app.add_handler(CommandHandler("delete", delete_tx_command))
             app.add_handler(CommandHandler("xoa", delete_tx_command))
-            app.add_handler(CommandHandler("del", edit_command))
             app.add_handler(CommandHandler("alert", alert_command))
             app.add_handler(CommandHandler("alerts", alerts_command))
             app.add_handler(CommandHandler("stats", stats_command))
@@ -2986,9 +2692,7 @@ try:
             
             logger.info("✅ Đã đăng ký handlers")
             
-            # Threads
             threading.Thread(target=schedule_backup, daemon=True).start()
-            threading.Thread(target=schedule_cleanup, daemon=True).start()
             threading.Thread(target=check_alerts, daemon=True).start()
             threading.Thread(target=run_health_server, daemon=True).start()
             
