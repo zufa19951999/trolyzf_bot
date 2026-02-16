@@ -916,9 +916,7 @@ try:
         return InlineKeyboardMarkup(keyboard)
 
     # ==================== COMMAND HANDLERS ====================
-        
     async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        logger.info(f"Start command from user {update.effective_user.id} in chat {update.effective_chat.type}")
         # Kiểm tra nếu là trong nhóm
         if update.effective_chat.type in ['group', 'supergroup']:
             welcome_msg = (
@@ -930,12 +928,11 @@ try:
                 "• `/buy btc 0.5 40000` - Mua coin\n"
                 "• `/sell btc 0.2` - Bán coin\n"
                 "• Và nhiều lệnh khác...\n\n"
+                "📱 *Trên điện thoại:* Vuốt xuống dưới để hiện menu\n"
                 f"🕐 {format_vn_time()}"
             )
-            # VẪN HIỂN THỊ KEYBOARD TRONG NHÓM
             await update.message.reply_text(welcome_msg, parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_keyboard())
         else:
-            # Code cũ cho chat riêng
             welcome_msg = (
                 "🚀 *ĐẦU TƯ COIN & QUẢN LÝ CHI TIÊU*\n\n"
                 "🤖 Bot hỗ trợ:\n\n"
@@ -950,6 +947,7 @@ try:
                 "• Hỗ trợ đa tiền tệ\n"
                 "• Quản lý ngân sách theo danh mục\n"
                 "• Báo cáo theo ngày/tháng/năm\n\n"
+                "📱 *Trên điện thoại:* Vuốt xuống dưới để hiện menu\n"
                 f"🕐 *Hiện tại:* `{format_vn_time()}`\n\n"
                 "👇 *Chọn chức năng bên dưới*"
             )
