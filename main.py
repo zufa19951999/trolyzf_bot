@@ -580,6 +580,7 @@ try:
                 if conn:
                     conn.close()
     
+        # ==================== USER FUNCTIONS ====================
         def update_user_info(user):
             """Cập nhật thông tin user"""
             conn = None
@@ -592,6 +593,7 @@ try:
                           (user.id, user.username, user.first_name, user.last_name,
                            get_vn_time().strftime("%Y-%m-%d %H:%M:%S")))
                 conn.commit()
+                logger.info(f"✅ Đã cập nhật user {user.id} - {user.username}")
                 return True
             except Exception as e:
                 logger.error(f"❌ Lỗi cập nhật user: {e}")
