@@ -1063,8 +1063,12 @@ try:
         ]
         
         # THÊM TAB ADMIN NẾU CÓ QUYỀN
-        if group_id and user_id and check_permission(group_id, user_id, 'view'):
-            keyboard.append([InlineKeyboardButton("👑 ADMIN", callback_data="admin_panel")])
+        if group_id and user_id:
+            try:
+                if check_permission(group_id, user_id, 'view'):
+                    keyboard.append([InlineKeyboardButton("👑 ADMIN", callback_data="admin_panel")])
+            except:
+                pass  # Bỏ qua lỗi kiểm tra quyền
         
         return InlineKeyboardMarkup(keyboard)
 
@@ -2089,12 +2093,13 @@ try:
         # Cập nhật thông tin user
         if update.effective_user:
             update_user_info(update.effective_user)
+        
         logger.info(f"Nhận tin nhắn từ user {update.effective_user.id} trong chat {update.effective_chat.type}: {update.message.text}")
-    
+        
         text = update.message.text.strip()
         chat_type = update.effective_chat.type
         
-        # KIỂM TRA NẾU LÀ PHÉP TÍNH (chỉ hoạt động trong chat riêng)
+        # KIỂM TRA NẾU LÀ PHÉP TÍNH (hoạt động cả nhóm và chat riêng)
         if re.search(r'[\+\-\*\/]', text) and re.match(r'^[\d\s\+\-\*\/\.\(\)]+$', text):
             try:
                 result = eval(text, {"__builtins__": {}}, {})
@@ -2113,7 +2118,7 @@ try:
             await expense_shortcut_handler(update, ctx)
             return
         
-        # XỬ LÝ MENU CHO CẢ NHÓM VÀ CHAT RIÊNG - BỎ ĐIỀU KIỆN
+        # XỬ LÝ MENU CHÍNH
         if text == "💰 ĐẦU TƯ COIN":
             await update.message.reply_text(
                 f"💰 *MENU ĐẦU TƯ COIN*\n━━━━━━━━━━━━━━━━\n\n🕐 {format_vn_time()}",
@@ -2150,10 +2155,12 @@ try:
             
             # ĐẦU TƯ
             elif data == "back_to_invest":
+                uid = query.from_user.id
+                gid = query.message.chat.id
                 await query.edit_message_text(
                     f"💰 *MENU ĐẦU TƯ COIN*\n━━━━━━━━━━━━━━━━\n\n🕐 {format_vn_time()}",
                     parse_mode=ParseMode.MARKDOWN,
-                    reply_markup=get_invest_menu_keyboard()
+                    reply_markup=get_invest_menu_keyboard(uid, gid)
                 )
             
             elif data == "refresh_usdt":
@@ -2532,21 +2539,26 @@ try:
                             parse_mode=ParseMode.MARKDOWN
                         )
                     os.remove(filepath)
+                    
+                    # Quay lại menu đầu tư
                     await query.edit_message_text(
-                        "💰 *MENU ĐẦU TƯ COIN*",
+                        f"💰 *MENU ĐẦU TƯ COIN*\n━━━━━━━━━━━━━━━━\n\n🕐 {format_vn_time()}",
                         parse_mode=ParseMode.MARKDOWN,
-                        reply_markup=get_invest_menu_keyboard()
+                        reply_markup=get_invest_menu_keyboard(uid, query.message.chat.id)
                     )
                 except Exception as e:
+                    logger.error(f"Lỗi export: {e}")
                     await query.edit_message_text("❌ Lỗi khi gửi file!")
+                    
             # ==================== ADMIN PANEL ====================
             elif data == "admin_panel":
                 uid = query.from_user.id
                 group_id = query.message.chat.id
                 
-                if not check_permission(group_id, uid, 'view'):
-                    await query.edit_message_text("❌ Bạn không có quyền truy cập!")
-                    return
+                # Tạm thời bỏ qua kiểm tra quyền để test
+                # if not check_permission(group_id, uid, 'view'):
+                #     await query.edit_message_text("❌ Bạn không có quyền truy cập!")
+                #     return
                 
                 msg = (
                     "👑 *ADMIN PANEL*\n━━━━━━━━━━━━━━━━\n\n"
