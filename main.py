@@ -539,7 +539,10 @@ try:
                              FROM permissions WHERE group_id = ? AND admin_id = ?''',
                           (group_id, user_id))
                 result = c.fetchone()
-                
+
+                # Log để kiểm tra
+                logger.info(f"check_permission for user {user_id} in group {group_id}: {result}")
+            
                 if not result:
                     return False
                 
@@ -572,7 +575,12 @@ try:
                              FROM permissions p
                              WHERE p.group_id = ?
                              ORDER BY p.created_at''', (group_id,))
-                return c.fetchall()
+                results = c.fetchall()
+                
+                # Log để kiểm tra
+                logger.info(f"get_all_admins for group {group_id}: {results}")
+                
+                return results
             except Exception as e:
                 logger.error(f"❌ Lỗi lấy danh sách admin: {e}")
                 return []
