@@ -2414,28 +2414,28 @@ try:
                     )
                 except Exception as e:
                     await query.edit_message_text("❌ Lỗi khi gửi file!")
-                        # ==================== ADMIN PANEL ====================
-                        elif data == "admin_panel":
-                            uid = query.from_user.id
-                            group_id = query.message.chat.id
-                            
-                            if not check_permission(group_id, uid, 'view'):
-                                await query.edit_message_text("❌ Bạn không có quyền truy cập!")
-                                return
-                            
-                            msg = (
-                                "👑 *ADMIN PANEL*\n━━━━━━━━━━━━━━━━\n\n"
-                                "• `/perm list` - Danh sách admin\n"
-                                "• `/perm grant @user view` - Cấp quyền xem\n"
-                                "• `/perm grant @user edit` - Cấp quyền sửa\n"
-                                "• `/perm grant @user delete` - Cấp quyền xóa\n"
-                                "• `/perm grant @user manage` - Cấp quyền QL\n"
-                                "• `/perm revoke @user` - Thu hồi quyền\n\n"
-                                f"🕐 {format_vn_time()}"
-                            )
-                            
-                            keyboard = [[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
-                            await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
+            # ==================== ADMIN PANEL ====================
+            elif data == "admin_panel":
+                uid = query.from_user.id
+                group_id = query.message.chat.id
+                
+                if not check_permission(group_id, uid, 'view'):
+                    await query.edit_message_text("❌ Bạn không có quyền truy cập!")
+                    return
+                
+                msg = (
+                    "👑 *ADMIN PANEL*\n━━━━━━━━━━━━━━━━\n\n"
+                    "• `/perm list` - Danh sách admin\n"
+                    "• `/perm grant @user view` - Cấp quyền xem\n"
+                    "• `/perm grant @user edit` - Cấp quyền sửa\n"
+                    "• `/perm grant @user delete` - Cấp quyền xóa\n"
+                    "• `/perm grant @user manage` - Cấp quyền QL\n"
+                    "• `/perm revoke @user` - Thu hồi quyền\n\n"
+                    f"🕐 {format_vn_time()}"
+                )
+                
+                keyboard = [[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
+                await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
                 
             # QUẢN LÝ CHI TIÊU
             elif data == "back_to_expense":
