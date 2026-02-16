@@ -953,6 +953,13 @@ try:
             )
             await update.message.reply_text(welcome_msg, parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_keyboard())
     
+    async def menu_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Hiện lại menu chính"""
+        await update.message.reply_text(
+            "👇 *Chọn chức năng bên dưới*",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=get_main_keyboard()
+        )
     
     async def help_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         help_msg = (
@@ -2511,6 +2518,7 @@ try:
             # Đăng ký handlers
             app.add_handler(CommandHandler("start", start))
             app.add_handler(CommandHandler("help", help_command))
+            app.add_handler(CommandHandler("menu", menu_command))
             app.add_handler(CommandHandler("usdt", usdt_command))
             app.add_handler(CommandHandler("s", s_command))
             app.add_handler(CommandHandler("buy", buy_command))
