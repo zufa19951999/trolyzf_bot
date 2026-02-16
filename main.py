@@ -918,6 +918,7 @@ try:
     # ==================== COMMAND HANDLERS ====================
         
     async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        logger.info(f"Start command from user {update.effective_user.id} in chat {update.effective_chat.type}")
         # Kiểm tra nếu là trong nhóm
         if update.effective_chat.type in ['group', 'supergroup']:
             welcome_msg = (
