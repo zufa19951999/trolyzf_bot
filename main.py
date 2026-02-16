@@ -1576,6 +1576,123 @@ try:
         stats_msg += f"\n🕐 {format_vn_time()}"
         
         await msg.edit_text(stats_msg, parse_mode=ParseMode.MARKDOWN)
+    # ==================== PERMISSION COMMAND ====================
+    async def perm_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Quản lý phân quyền admin"""
+        user_id = update.effective_user.id
+        chat_id = update.effective_chat.id
+        chat_type = update.effective_chat.type
+        
+        # Chỉ hoạt động trong nhóm
+        if chat_type not in ['group', 'supergroup']:
+            await update.message.reply_text("❌ Lệnh này chỉ dùng trong nhóm!")
+            return
+        
+        # Kiểm tra người dùng có quyền quản lý không
+        if not check_permission(chat_id, user_id, 'manage'):
+            await update.message.reply_text("❌ Bạn không có quyền quản lý phân quyền!")
+            return
+        
+        if not ctx.args:
+            msg = (
+                "🔐 *QUẢN LÝ PHÂN QUYỀN*\n━━━━━━━━━━━━━━━━\n\n"
+                "*Các lệnh:*\n"
+                "• `/perm list` - Xem danh sách admin\n"
+                "• `/perm grant @user view` - Cấp quyền xem\n"
+                "• `/perm grant @user edit` - Cấp quyền sửa\n"
+                "• `/perm grant @user delete` - Cấp quyền xóa\n"
+                "• `/perm grant @user manage` - Cấp quyền quản lý\n"
+                "• `/perm grant @user full` - Cấp toàn quyền\n"
+                "• `/perm revoke @user` - Thu hồi quyền\n\n"
+                f"🕐 {format_vn_time_short()}"
+            )
+            await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+            return
+        
+        if ctx.args[0] == "list":
+            admins = get_all_admins(chat_id)
+            if not admins:
+                await update.message.reply_text("📭 Chưa có admin nào được cấp quyền!")
+                return
+            
+            msg = "👑 *DANH SÁCH ADMIN*\n━━━━━━━━━━━━━━━━\n\n"
+            for admin in admins:
+                admin_id, view, edit, delete, manage = admin
+                permissions = []
+                if view: permissions.append("👁 Xem")
+                if edit: permissions.append("✏️ Sửa")
+                if delete: permissions.append("🗑 Xóa")
+                if manage: permissions.append("🔐 Quản lý")
+                
+                msg += f"• `{admin_id}`: {', '.join(permissions)}\n"
+            
+            msg += f"\n🕐 {format_vn_time_short()}"
+            await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+        
+        elif ctx.args[0] == "grant" and len(ctx.args) >= 3:
+            target = ctx.args[1]
+            perm_type = ctx.args[2].lower()
+            
+            # Lấy user_id từ username
+            if target.startswith('@'):
+                username = target[1:]
+                target_id = get_user_id_by_username(username)
+                if not target_id:
+                    await update.message.reply_text(f"❌ Không tìm thấy user {target}")
+                    return
+            else:
+                try:
+                    target_id = int(target)
+                except:
+                    await update.message.reply_text("❌ ID không hợp lệ!")
+                    return
+            
+            permissions = {'view': 0, 'edit': 0, 'delete': 0, 'manage': 0}
+            
+            if perm_type == 'view':
+                permissions['view'] = 1
+            elif perm_type == 'edit':
+                permissions['view'] = 1
+                permissions['edit'] = 1
+            elif perm_type == 'delete':
+                permissions['view'] = 1
+                permissions['delete'] = 1
+            elif perm_type == 'manage':
+                permissions['manage'] = 1
+            elif perm_type == 'full':
+                permissions['view'] = 1
+                permissions['edit'] = 1
+                permissions['delete'] = 1
+                permissions['manage'] = 1
+            else:
+                await update.message.reply_text("❌ Loại quyền không hợp lệ!")
+                return
+            
+            if grant_permission(chat_id, target_id, user_id, permissions):
+                await update.message.reply_text(f"✅ Đã cấp quyền {perm_type} cho {target}")
+            else:
+                await update.message.reply_text("❌ Lỗi khi cấp quyền!")
+        
+        elif ctx.args[0] == "revoke" and len(ctx.args) >= 2:
+            target = ctx.args[1]
+            
+            if target.startswith('@'):
+                username = target[1:]
+                target_id = get_user_id_by_username(username)
+                if not target_id:
+                    await update.message.reply_text(f"❌ Không tìm thấy user {target}")
+                    return
+            else:
+                try:
+                    target_id = int(target)
+                except:
+                    await update.message.reply_text("❌ ID không hợp lệ!")
+                    return
+            
+            if revoke_permission(chat_id, target_id):
+                await update.message.reply_text(f"✅ Đã thu hồi quyền của {target}")
+            else:
+                await update.message.reply_text("❌ Không tìm thấy quyền!")
 
         # ==================== PERMISSION COMMAND ====================
         async def perm_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
