@@ -27,7 +27,7 @@ from functools import wraps
 from flask import Flask, request
 import asyncio
 # ==================== OWNER CONFIGURATION ====================
-OWNER_ID = 6737175223  # Thay bằng ID của ADM
+OWNER_ID = 1164334777  # Thay bằng ID của ADM
 OWNER_USERNAME = "adm"  # Username của ADM
 
 def is_owner(user_id):
