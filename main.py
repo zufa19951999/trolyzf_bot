@@ -26,6 +26,17 @@ from telegram.error import TelegramError
 from functools import wraps
 from flask import Flask, request
 import asyncio
+# ==================== THÊM HÀM NÀY VÀO ĐÂY ====================
+def escape_markdown(text):
+    """Escape các ký tự đặc biệt trong markdown"""
+    if not text:
+        return ""
+    # Danh sách ký tự cần escape trong markdown
+    special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    for char in special_chars:
+        text = text.replace(char, f'\\{char}')
+    return text
+    
 # ==================== OWNER CONFIGURATION ====================
 OWNER_ID = 1164334777  # Thay bằng ID của ADM
 OWNER_USERNAME = "adm"  # Username của ADM
@@ -4509,40 +4520,39 @@ try:
                 try:
                     current_user_id = query.from_user.id
                     chat_id = query.message.chat.id
-                    
-                    # Lấy effective_user_id (chủ sở hữu) từ context
                     effective_user_id = ctx.bot_data.get('effective_user_id', current_user_id)
                     
-                    # Kiểm tra quyền xem của người khác
                     if current_user_id != effective_user_id and not check_permission(chat_id, current_user_id, 'view'):
-                        await query.edit_message_text(
-                            "❌ Bạn không có quyền xem dữ liệu!",
-                            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_expense")]])
-                        )
+                        await query.edit_message_text("❌ Bạn không có quyền xem dữ liệu!")
                         return
-                
-                    # Dùng effective_user_id (chủ sở hữu) để lấy dữ liệu
+                    
                     incomes_data = get_income_by_period(effective_user_id, 'month')
                     expenses_data = get_expenses_by_period(effective_user_id, 'month')
                     
-                    # Lấy thông tin chủ sở hữu để hiển thị
+                    # Lấy thông tin user
                     conn = sqlite3.connect(DB_PATH)
                     c = conn.cursor()
                     c.execute("SELECT username, first_name FROM users WHERE user_id = ?", (effective_user_id,))
                     owner_info = c.fetchone()
                     conn.close()
                     
-                    owner_name = f"@{owner_info[0]}" if owner_info and owner_info[0] else (owner_info[1] if owner_info else f"User {effective_user_id}")
+                    # ESCAPE tên owner
+                    raw_owner = f"@{owner_info[0]}" if owner_info and owner_info[0] else (owner_info[1] if owner_info else f"User {effective_user_id}")
+                    safe_owner = escape_markdown(raw_owner)
                     
-                    msg = f"📅 *CHI TIÊU THÁNG {get_vn_time().strftime('%m/%Y')} - {owner_name}*\n━━━━━━━━━━━━━━━━\n\n"
+                    msg = f"📅 *CHI TIÊU THÁNG {get_vn_time().strftime('%m/%Y')} - {safe_owner}*\n━━━━━━━━━━━━━━━━\n\n"
                     
                     if incomes_data['transactions']:
                         msg += "*💰 THU NHẬP:*\n"
                         for inc in incomes_data['transactions'][:10]:
                             id, amount, source, note, currency, date = inc
-                            msg += f"• #{id} {date}: {format_currency_simple(amount, currency)} - {source}\n"
-                            if note:
-                                msg += f"  📝 {note}\n"
+                            # ESCAPE nguồn và ghi chú
+                            safe_source = escape_markdown(source)
+                            safe_note = escape_markdown(note) if note else ""
+                            
+                            msg += f"• #{id} {date}: {format_currency_simple(amount, currency)} - {safe_source}\n"
+                            if safe_note:
+                                msg += f"  📝 {safe_note}\n"
                         
                         msg += f"\n📊 *Tổng thu:*\n"
                         for currency, total in incomes_data['summary'].items():
@@ -4555,9 +4565,13 @@ try:
                         msg += "*💸 CHI TIÊU:*\n"
                         for exp in expenses_data['transactions'][:10]:
                             id, cat_name, amount, note, currency, date, budget = exp
-                            msg += f"• #{id} {date}: {format_currency_simple(amount, currency)} - {cat_name}\n"
-                            if note:
-                                msg += f"  📝 {note}\n"
+                            # ESCAPE tên danh mục và ghi chú
+                            safe_cat = escape_markdown(cat_name)
+                            safe_note = escape_markdown(note) if note else ""
+                            
+                            msg += f"• #{id} {date}: {format_currency_simple(amount, currency)} - {safe_cat}\n"
+                            if safe_note:
+                                msg += f"  📝 {safe_note}\n"
                         
                         msg += f"\n📊 *Tổng chi:*\n"
                         for currency, total in expenses_data['summary'].items():
@@ -4567,9 +4581,28 @@ try:
                     
                     msg += f"\n\n🕐 {format_vn_time()}"
                     
+                    # KIỂM TRA ĐỘ DÀI TIN NHẮN
+                    if len(msg) > 4000:
+                        # Chia nhỏ tin nhắn
+                        await query.edit_message_text("📊 *Báo cáo quá dài, đang chia nhỏ...*")
+                        
+                        chunks = [msg[i:i+3500] for i in range(0, len(msg), 3500)]
+                        for i, chunk in enumerate(chunks, 1):
+                            await query.message.reply_text(
+                                f"{chunk}\n\n*(Phần {i}/{len(chunks)})*",
+                                parse_mode=ParseMode.MARKDOWN
+                            )
+                    else:
+                        await query.edit_message_text(
+                            msg, 
+                            parse_mode=ParseMode.MARKDOWN,
+                            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_expense")]])
+                        )
+                        
+                except Exception as e:
+                    logger.error(f"Lỗi expense_month: {e}", exc_info=True)
                     await query.edit_message_text(
-                        msg, 
-                        parse_mode=ParseMode.MARKDOWN,
+                        "❌ Có lỗi xảy ra!",
                         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_expense")]])
                     )
                 except Exception as e:
