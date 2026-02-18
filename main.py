@@ -1944,6 +1944,60 @@ try:
             if conn:
                 conn.close()
 
+    def delete_category(category_id, owner_id):
+        """
+        Xóa danh mục chi tiêu
+        category_id: ID của danh mục cần xóa
+        owner_id: ID của chủ sở hữu
+        Trả về: (success, message, deleted_expenses_count)
+        """
+        conn = None
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            
+            # Kiểm tra danh mục có tồn tại và thuộc về owner không
+            c.execute('''SELECT id, name FROM expense_categories 
+                         WHERE id = ? AND user_id = ?''', (category_id, owner_id))
+            category = c.fetchone()
+            
+            if not category:
+                return False, "❌ Không tìm thấy danh mục!", 0
+            
+            category_name = category[1]
+            
+            # Đếm số chi tiêu trong danh mục này
+            c.execute('''SELECT COUNT(*) FROM expenses 
+                         WHERE category_id = ? AND user_id = ?''', (category_id, owner_id))
+            expenses_count = c.fetchone()[0]
+            
+            # Bắt đầu transaction
+            c.execute("BEGIN TRANSACTION")
+            
+            # Xóa tất cả chi tiêu trong danh mục
+            c.execute('''DELETE FROM expenses 
+                         WHERE category_id = ? AND user_id = ?''', (category_id, owner_id))
+            deleted_expenses = c.rowcount
+            
+            # Xóa danh mục
+            c.execute('''DELETE FROM expense_categories 
+                         WHERE id = ? AND user_id = ?''', (category_id, owner_id))
+            
+            conn.commit()
+            
+            logger.info(f"✅ Đã xóa danh mục {category_name} (ID: {category_id}) của user {owner_id}, kèm {deleted_expenses} khoản chi")
+            
+            return True, category_name, deleted_expenses
+            
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            logger.error(f"❌ Lỗi xóa danh mục: {e}")
+            return False, str(e), 0
+        finally:
+            if conn:
+                conn.close()
+
     # ==================== KEYBOARD ====================
     def get_main_keyboard():
         keyboard = [
@@ -3710,6 +3764,113 @@ try:
         else:
             await update.message.reply_text(f"❌ Không tìm thấy {target} trong danh sách admin!")
 
+    @auto_update_user
+    @require_group_permission('delete')
+    async def delete_category_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Xóa danh mục chi tiêu"""
+        owner_id = ctx.bot_data.get('effective_user_id', update.effective_user.id)
+        
+        if not ctx.args:
+            # Hiển thị danh sách danh mục để chọn
+            categories = get_expense_categories(owner_id)
+            
+            if not categories:
+                await update.message.reply_text("📭 Chưa có danh mục nào để xóa!")
+                return
+            
+            msg = "🗑 *CHỌN DANH MỤC CẦN XÓA*\n━━━━━━━━━━━━━━━━\n\n"
+            keyboard = []
+            row = []
+            
+            for i, cat in enumerate(categories, 1):
+                cat_id, name, budget, created = cat
+                msg += f"{i}. *{name}* - {format_currency_simple(budget, 'VND')}\n"
+                
+                row.append(InlineKeyboardButton(f"{i}", callback_data=f"del_cat_{cat_id}"))
+                if len(row) == 5:
+                    keyboard.append(row)
+                    row = []
+            
+            if row:
+                keyboard.append(row)
+            
+            keyboard.append([InlineKeyboardButton("🔙 Về menu", callback_data="back_to_expense")])
+            
+            msg += f"\n🕐 {format_vn_time_short()}"
+            
+            await update.message.reply_text(
+                msg,
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return
+        
+        # Nếu có argument, xóa trực tiếp theo ID
+        try:
+            category_id = int(ctx.args[0])
+            
+            # Hỏi xác nhận
+            keyboard = [[
+                InlineKeyboardButton("✅ Xác nhận xóa", callback_data=f"confirm_del_cat_{category_id}"),
+                InlineKeyboardButton("❌ Hủy", callback_data="expense_categories")
+            ]]
+            
+            # Lấy thông tin danh mục
+            categories = get_expense_categories(owner_id)
+            category_name = "Không xác định"
+            for cat in categories:
+                if cat[0] == category_id:
+                    category_name = cat[1]
+                    break
+            
+            await update.message.reply_text(
+                f"⚠️ *CẢNH BÁO: XÓA DANH MỤC*\n━━━━━━━━━━━━━━━━\n\n"
+                f"📋 Danh mục: *{category_name}* (ID: {category_id})\n\n"
+                f"❗️ Hành động này sẽ xóa:\n"
+                f"• Danh mục *{category_name}*\n"
+                f"• Tất cả chi tiêu trong danh mục này\n\n"
+                f"❌ *Không thể khôi phục!*\n\n"
+                f"Bạn có chắc chắn muốn xóa?",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            
+        except ValueError:
+            await update.message.reply_text("❌ ID không hợp lệ!")
+
+    @auto_update_user
+    @require_group_permission('delete')
+    async def quick_delete_category(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Xóa danh mục nhanh bằng cách reply"""
+        if not update.message.reply_to_message:
+            await update.message.reply_text("❌ Hãy reply tin nhắn chứa ID danh mục cần xóa!")
+            return
+        
+        # Lấy ID từ tin nhắn được reply
+        reply_text = update.message.reply_to_message.text
+        import re
+        match = re.search(r'\*(\d+)\.\*', reply_text) or re.search(r'ID: (\d+)', reply_text)
+        
+        if not match:
+            await update.message.reply_text("❌ Không tìm thấy ID danh mục trong tin nhắn được reply!")
+            return
+        
+        category_id = int(match.group(1))
+        owner_id = ctx.bot_data.get('effective_user_id', update.effective_user.id)
+        
+        # Hỏi xác nhận
+        keyboard = [[
+            InlineKeyboardButton("✅ Xác nhận xóa", callback_data=f"confirm_del_cat_{category_id}"),
+            InlineKeyboardButton("❌ Hủy", callback_data="expense_categories")
+        ]]
+        
+        await update.message.reply_text(
+            f"⚠️ *XÁC NHẬN XÓA DANH MỤC #{category_id}*\n\n"
+            f"Bạn có chắc chắn muốn xóa?",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
     # ==================== PERMISSION COMMAND ====================
     async def perm_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
@@ -4892,6 +5053,62 @@ try:
                     msg, parse_mode=ParseMode.MARKDOWN,
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
+
+            elif data.startswith("del_cat_"):
+                category_id = int(data.replace("del_cat_", ""))
+                owner_id = ctx.bot_data.get('effective_user_id', query.from_user.id)
+                
+                # Lấy thông tin danh mục
+                categories = get_expense_categories(owner_id)
+                category_name = "Không xác định"
+                for cat in categories:
+                    if cat[0] == category_id:
+                        category_name = cat[1]
+                        break
+                
+                keyboard = [[
+                    InlineKeyboardButton("✅ Xác nhận xóa", callback_data=f"confirm_del_cat_{category_id}"),
+                    InlineKeyboardButton("❌ Hủy", callback_data="expense_categories")
+                ]]
+                
+                await query.edit_message_text(
+                    f"⚠️ *CẢNH BÁO: XÓA DANH MỤC*\n━━━━━━━━━━━━━━━━\n\n"
+                    f"📋 Danh mục: *{category_name}* (ID: {category_id})\n\n"
+                    f"❗️ Hành động này sẽ xóa:\n"
+                    f"• Danh mục *{category_name}*\n"
+                    f"• Tất cả chi tiêu trong danh mục này\n\n"
+                    f"❌ *Không thể khôi phục!*\n\n"
+                    f"Bạn có chắc chắn muốn xóa?",
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+            
+            elif data.startswith("confirm_del_cat_"):
+                category_id = int(data.replace("confirm_del_cat_", ""))
+                owner_id = ctx.bot_data.get('effective_user_id', query.from_user.id)
+                
+                await query.edit_message_text("🔄 Đang xóa danh mục...")
+                
+                success, result, deleted_count = delete_category(category_id, owner_id)
+                
+                if success:
+                    msg = (
+                        f"✅ *XÓA DANH MỤC THÀNH CÔNG*\n━━━━━━━━━━━━━━━━\n\n"
+                        f"📋 Đã xóa danh mục: *{result}*\n"
+                        f"💰 Đã xóa {deleted_count} khoản chi tiêu liên quan\n\n"
+                        f"🕐 {format_vn_time()}"
+                    )
+                else:
+                    msg = f"❌ *LỖI*\n━━━━━━━━━━━━━━━━\n\n{result}\n\n🕐 {format_vn_time()}"
+                
+                keyboard = [[InlineKeyboardButton("📋 Xem danh mục", callback_data="expense_categories")],
+                            [InlineKeyboardButton("🔙 Về menu", callback_data="back_to_expense")]]
+                
+                await query.edit_message_text(
+                    msg,
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
             
             elif data == "edit_transactions":
                 uid = query.from_user.id
@@ -5391,6 +5608,45 @@ try:
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
 
+            elif data == "expense_categories":
+                owner_id = ctx.bot_data.get('effective_user_id', query.from_user.id)
+                categories = get_expense_categories(owner_id)
+                
+                if not categories:
+                    await query.edit_message_text(
+                        f"📋 Chưa có danh mục nào!\nTạo: `dm [tên] [budget]`\n\n🕐 {format_vn_time_short()}",
+                        parse_mode=ParseMode.MARKDOWN,
+                        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_expense")]])
+                    )
+                    return
+                
+                msg = "📋 *DANH MỤC CỦA BẠN*\n━━━━━━━━━━━━━━━━\n\n"
+                keyboard = []
+                row = []
+                
+                for cat in categories:
+                    cat_id, name, budget, created = cat
+                    msg += f"• *{cat_id}.* {name} - {format_currency_simple(budget, 'VND')}\n"
+                    
+                    row.append(InlineKeyboardButton(f"🗑 {cat_id}", callback_data=f"del_cat_{cat_id}"))
+                    if len(row) == 4:
+                        keyboard.append(row)
+                        row = []
+                
+                if row:
+                    keyboard.append(row)
+                
+                keyboard.append([InlineKeyboardButton("➕ Thêm danh mục", callback_data="expense_expense_menu"),
+                                 InlineKeyboardButton("🔙 Về menu", callback_data="back_to_expense")])
+                
+                msg += f"\n🕐 {format_vn_time_short()}"
+                
+                await query.edit_message_text(
+                    msg,
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+                
         except Exception as e:
             logger.error(f"Lỗi callback: {e}")
             await query.edit_message_text("❌ Có lỗi xảy ra!")
@@ -5758,6 +6014,11 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
             app.add_handler(CommandHandler("addadmin", add_admin_command))
             app.add_handler(CommandHandler("listadmin", list_admin_command))
             app.add_handler(CommandHandler("removeadmin", remove_admin_command))
+            app.add_handler(CommandHandler("xoadm", delete_category_command))
+            app.add_handler(CommandHandler("xoacategory", delete_category_command))
+            app.add_handler(CommandHandler("xoadanhmuc", delete_category_command))
+            app.add_handler(CommandHandler("xoadanhmuc", delete_category_command))
+            app.add_handler(CommandHandler("delcat", delete_category_command))
             app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_chat_members))
             app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
             app.add_handler(CallbackQueryHandler(handle_callback))
