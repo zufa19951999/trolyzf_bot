@@ -4824,6 +4824,10 @@ try:
             elif data == "export_csv" or data == "expense_export":
                 await export_csv_handler(update, ctx)
                 return
+
+        except Exception as e:
+            logger.error(f"Lỗi callback: {e}")
+            await query.edit_message_text("❌ Có lỗi xảy ra!")
     
     # ==================== PORTFOLIO STATS HELPER ====================
     def get_portfolio_stats(user_id):
