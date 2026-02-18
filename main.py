@@ -1124,6 +1124,8 @@ try:
                         )
                         return
                     
+                    # QUAN TRỌNG: Đảm bảo effective_user_id vẫn là owner
+                    context.bot_data['effective_user_id'] = effective_user
                     return await func(update, context, *args, **kwargs)
                 
                 return await func(update, context, *args, **kwargs)
@@ -1552,14 +1554,14 @@ try:
             if conn:
                 conn.close()
 
-    def get_expense_categories(user_id):
+    def get_expense_categories(owner_id): 
         conn = None
         try:
             conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
             c.execute('''SELECT id, name, budget, created_at 
                          FROM expense_categories WHERE user_id = ? 
-                         ORDER BY name''', (user_id,))
+                         ORDER BY name''', (owner_id,))  # Dùng owner_id
             return c.fetchall()
         except Exception as e:
             logger.error(f"❌ Lỗi lấy categories: {e}")
@@ -1568,7 +1570,7 @@ try:
             if conn:
                 conn.close()
 
-    def add_income(user_id, amount, source, currency='VND', note=""):
+    def add_income(owner_id, amount, source, currency='VND', note=""):
         conn = None
         try:
             conn = sqlite3.connect(DB_PATH)
@@ -1580,7 +1582,7 @@ try:
             c.execute('''INSERT INTO incomes 
                          (user_id, amount, source, income_date, note, created_at, currency)
                          VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                      (user_id, amount, source, income_date, note, created_at, currency))
+                      (owner_id, amount, source, income_date, note, created_at, currency))
             conn.commit()
             return True
         except Exception as e:
@@ -1590,7 +1592,7 @@ try:
             if conn:
                 conn.close()
 
-    def add_expense(user_id, category_id, amount, currency='VND', note=""):
+    def add_expense(owner_id, category_id, amount, currency='VND', note=""):
         conn = None
         try:
             conn = sqlite3.connect(DB_PATH)
@@ -1602,7 +1604,7 @@ try:
             c.execute('''INSERT INTO expenses 
                          (user_id, category_id, amount, note, expense_date, created_at, currency)
                          VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                      (user_id, category_id, amount, note, expense_date, created_at, currency))
+                      (owner_id, category_id, amount, note, expense_date, created_at, currency))
             conn.commit()
             return True
         except Exception as e:
@@ -2392,7 +2394,7 @@ try:
     @auto_update_user
     async def balance_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Xem cân đối thu chi"""
-        user_id = ctx.bot_data.get('effective_user_id', update.effective_user.id)
+        owner_id = ctx.bot_data.get('effective_user_id', update.effective_user.id)
         chat_id = update.effective_chat.id
         chat_type = update.effective_chat.type
         
@@ -3931,7 +3933,7 @@ try:
                         source = parts[2]
                         note = " ".join(parts[3:]) if len(parts) > 3 else ""
                 
-                if add_income(user_id, amount, source, currency, note):
+                if add_income(owner_id, amount, source, currency, note):
                     await update.message.reply_text(
                         f"✅ *ĐÃ THÊM THU NHẬP*\n━━━━━━━━━━━━━━━━\n\n"
                         f"💰 Số tiền: *{format_currency_simple(amount, currency)}*\n"
@@ -3994,7 +3996,7 @@ try:
                 
                 note = " ".join(parts[start_idx:]) if len(parts) > start_idx else ""
                 
-                categories = get_expense_categories(user_id)
+                categories = get_expense_categories(owner_id)
                 category_exists = False
                 category_name = ""
                 for cat in categories:
@@ -4007,7 +4009,7 @@ try:
                     await update.message.reply_text(f"❌ Không tìm thấy danh mục #{category_id}!")
                     return
                 
-                if add_expense(user_id, category_id, amount, currency, note):
+                if add_expense(owner_id, category_id, amount, currency, note):
                     await update.message.reply_text(
                         f"✅ *ĐÃ THÊM CHI TIÊU*\n━━━━━━━━━━━━━━━━\n\n"
                         f"💰 Số tiền: *{format_currency_simple(amount, currency)}*\n"
@@ -5026,8 +5028,8 @@ try:
                 )
             
             elif data == "expense_categories":
-                uid = query.from_user.id
-                categories = get_expense_categories(uid)
+                owner_id = ctx.bot_data.get('effective_user_id', query.from_user.id)
+                categories = get_expense_categories(owner_id)
                 
                 if not categories:
                     await query.edit_message_text(
