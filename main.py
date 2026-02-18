@@ -1885,9 +1885,6 @@ def check_admin_permission(group_id, admin_id, permission='view'):
                 'income_count': incomes.get('total_count', 0),
                 'expense_count': expenses.get('total_count', 0)
             }
-        except Exception as e:
-            logger.error(f"❌ Lỗi get_balance_summary: {e}")
-            return None
 
     def delete_expense(expense_id, user_id):
         conn = None
@@ -1918,6 +1915,10 @@ def check_admin_permission(group_id, admin_id, permission='view'):
         finally:
             if conn:
                 conn.close()
+
+        except Exception as e:
+            logger.error(f"❌ Lỗi get_balance_summary: {e}")
+            return None
 
     # ==================== KEYBOARD ====================
     def get_main_keyboard():
