@@ -26,7 +26,8 @@ from telegram.error import TelegramError
 from functools import wraps
 from flask import Flask, request
 import asyncio
-# ==================== THÊM HÀM NÀY VÀO ĐÂY ====================
+
+# ==================== HÀM ESCAPE MARKDOWN ====================
 def escape_markdown(text):
     """Escape các ký tự đặc biệt trong markdown"""
     if not text:
@@ -36,7 +37,7 @@ def escape_markdown(text):
     for char in special_chars:
         text = text.replace(char, f'\\{char}')
     return text
-    
+
 # ==================== OWNER CONFIGURATION ====================
 OWNER_ID = 1164334777  # Thay bằng ID của ADM
 OWNER_USERNAME = "adm"  # Username của ADM
@@ -62,7 +63,7 @@ def get_effective_user_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     logger.info(f"💬 Private: user {user_id} đang thao tác trên data của chính mình")
     return user_id
-    
+
 # ==================== USERNAME CACHE ====================
 class UsernameCache:
     def __init__(self):
@@ -2873,7 +2874,7 @@ try:
                                 permissions = {'view': 1, 'edit': 1, 'delete': 1, 'manage': 1}
                             
                             c.execute('''INSERT INTO permissions 
-                                         (group_id, admin_id, granted_by, can_view_all, can_edit_all, 
+                                         (group_id, user_id, granted_by, can_view_all, can_edit_all, 
                                           can_delete_all, can_manage_perms, created_at)
                                          VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
                                       (chat_id, new_member.id, new_member.id,
@@ -4635,12 +4636,6 @@ try:
                         "❌ Có lỗi xảy ra!",
                         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_expense")]])
                     )
-                except Exception as e:
-                    logger.error(f"Lỗi expense_month: {e}")
-                    await query.edit_message_text(
-                        "❌ Có lỗi xảy ra!",
-                        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_expense")]])
-                    )
             
             elif data == "expense_recent":
                 try:
@@ -4775,8 +4770,8 @@ try:
                     logger.error(f"Lỗi expense_export: {e}")
                     await query.edit_message_text("❌ Có lỗi xảy ra khi xuất file!")
             
-                else:
-                    await query.edit_message_text("❌ Không hiểu lệnh!")
+            else:
+                await query.edit_message_text("❌ Không hiểu lệnh!")
         except Exception as e:
             logger.error(f"Lỗi callback: {e}")
             await query.edit_message_text("❌ Có lỗi xảy ra!")
