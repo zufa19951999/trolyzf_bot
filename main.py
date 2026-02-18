@@ -1190,64 +1190,64 @@ try:
 
     def grant_admin_permission(group_id, admin_id, granted_by, permissions):
         """Cấp quyền admin (chỉ owner mới được dùng)"""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        created_at = get_vn_time().strftime("%Y-%m-%d %H:%M:%S")
-        
-        # Xóa quyền cũ nếu có
-        c.execute("DELETE FROM group_admins WHERE group_id = ? AND admin_id = ?", 
-                  (group_id, admin_id))
-        
-        # Thêm quyền mới
-        c.execute('''INSERT INTO group_admins 
-                     (group_id, admin_id, granted_by, can_view, can_edit, can_delete, can_manage, created_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-                  (group_id, admin_id, granted_by,
-                   permissions.get('view', 0),
-                   permissions.get('edit', 0),
-                   permissions.get('delete', 0),
-                   permissions.get('manage', 0),
-                   created_at))
-        
-        conn.commit()
-        conn.close()
-        logger.info(f"✅ Granted admin permissions to {admin_id} in group {group_id}")
-        return True
-    except Exception as e:
-        logger.error(f"❌ Lỗi grant admin: {e}")
-        return False
-
-def check_admin_permission(group_id, admin_id, permission='view'):
-    """Kiểm tra quyền của admin"""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute('''SELECT can_view, can_edit, can_delete, can_manage 
-                     FROM group_admins 
-                     WHERE group_id = ? AND admin_id = ?''',
-                  (group_id, admin_id))
-        result = c.fetchone()
-        conn.close()
-        
-        if not result:
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            created_at = get_vn_time().strftime("%Y-%m-%d %H:%M:%S")
+            
+            # Xóa quyền cũ nếu có
+            c.execute("DELETE FROM group_admins WHERE group_id = ? AND admin_id = ?", 
+                      (group_id, admin_id))
+            
+            # Thêm quyền mới
+            c.execute('''INSERT INTO group_admins 
+                         (group_id, admin_id, granted_by, can_view, can_edit, can_delete, can_manage, created_at)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                      (group_id, admin_id, granted_by,
+                       permissions.get('view', 0),
+                       permissions.get('edit', 0),
+                       permissions.get('delete', 0),
+                       permissions.get('manage', 0),
+                       created_at))
+            
+            conn.commit()
+            conn.close()
+            logger.info(f"✅ Granted admin permissions to {admin_id} in group {group_id}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Lỗi grant admin: {e}")
             return False
-        
-        can_view, can_edit, can_delete, can_manage = result
-        
-        if permission == 'view':
-            return can_view == 1
-        elif permission == 'edit':
-            return can_edit == 1
-        elif permission == 'delete':
-            return can_delete == 1
-        elif permission == 'manage':
-            return can_manage == 1
-        
-        return False
-    except Exception as e:
-        logger.error(f"❌ Lỗi check_admin: {e}")
-        return False
+
+    def check_admin_permission(group_id, admin_id, permission='view'):
+        """Kiểm tra quyền của admin"""
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute('''SELECT can_view, can_edit, can_delete, can_manage 
+                         FROM group_admins 
+                         WHERE group_id = ? AND admin_id = ?''',
+                      (group_id, admin_id))
+            result = c.fetchone()
+            conn.close()
+            
+            if not result:
+                return False
+            
+            can_view, can_edit, can_delete, can_manage = result
+            
+            if permission == 'view':
+                return can_view == 1
+            elif permission == 'edit':
+                return can_edit == 1
+            elif permission == 'delete':
+                return can_delete == 1
+            elif permission == 'manage':
+                return can_manage == 1
+            
+            return False
+        except Exception as e:
+            logger.error(f"❌ Lỗi check_admin: {e}")
+            return False
 
     # ==================== GROUP OWNER MANAGEMENT ====================
     GROUP_OWNERS = {}
