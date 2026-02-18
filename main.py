@@ -3658,7 +3658,7 @@ try:
 
     @auto_update_user
     @require_group_permission('manage')
-        async def remove_admin_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    async def remove_admin_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Xóa admin khỏi group"""
         chat_id = update.effective_chat.id
         chat_type = update.effective_chat.type
