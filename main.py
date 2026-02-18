@@ -1558,6 +1558,58 @@ try:
             if conn:
                 conn.close()
 
+    def format_balance_message(balance_data, user_name=""):
+        """Định dạng tin nhắn cân đối thu chi"""
+        if not balance_data:
+            return "❌ Không có dữ liệu để hiển thị!"
+        
+        msg = f"⚖️ *CÂN ĐỐI THU CHI - {balance_data['title']}*"
+        if user_name:
+            msg += f" - {user_name}"
+        msg += "\n━━━━━━━━━━━━━━━━\n\n"
+        
+        # Hiển thị theo từng loại tiền
+        for b in balance_data['balances']:
+            currency = b['currency']
+            income = b['income']
+            expense = b['expense']
+            balance = b['balance']
+            
+            if income > 0 or expense > 0:
+                msg += f"*{currency}:*\n"
+                if income > 0:
+                    msg += f"  💰 Thu: {format_currency_simple(income, currency)}\n"
+                if expense > 0:
+                    msg += f"  💸 Chi: {format_currency_simple(expense, currency)}\n"
+                
+                # Hiển thị cân đối
+                if balance > 0:
+                    msg += f"  ✅ Dư: {format_currency_simple(balance, currency)}\n"
+                elif balance < 0:
+                    msg += f"  ❌ Thiếu: {format_currency_simple(abs(balance), currency)}\n"
+                else:
+                    msg += f"  ➖ Cân bằng\n"
+                msg += "\n"
+        
+        # Tổng kết bằng VND
+        if balance_data['total_income_vnd'] > 0 or balance_data['total_expense_vnd'] > 0:
+            msg += "*📊 TỔNG KẾT (VND):*\n"
+            msg += f"  💰 Tổng thu: {format_currency_simple(balance_data['total_income_vnd'], 'VND')}\n"
+            msg += f"  💸 Tổng chi: {format_currency_simple(balance_data['total_expense_vnd'], 'VND')}\n"
+            
+            total_balance = balance_data['total_balance_vnd']
+            if total_balance > 0:
+                msg += f"  ✅ Còn lại: {format_currency_simple(total_balance, 'VND')}\n"
+            elif total_balance < 0:
+                msg += f"  ❌ Thiếu: {format_currency_simple(abs(total_balance), 'VND')}\n"
+            else:
+                msg += f"  ➖ Cân bằng\n"
+        
+        msg += f"\n📊 Thống kê: {balance_data['income_count']} khoản thu, {balance_data['expense_count']} khoản chi"
+        msg += f"\n\n🕐 {format_vn_time()}"
+        
+        return msg
+
     def get_expenses_by_period(user_id, period='month'):
         conn = None
         try:
@@ -1625,6 +1677,102 @@ try:
         finally:
             if conn:
                 conn.close()
+
+    def get_balance_summary(user_id, period='month'):
+        """
+        Tính cân đối thu chi theo kỳ
+        period: 'day', 'month', 'year', 'all'
+        """
+        try:
+            # Lấy dữ liệu thu chi
+            if period == 'day':
+                incomes = get_income_by_period(user_id, 'day')
+                expenses = get_expenses_by_period(user_id, 'day')
+                title = f"HÔM NAY ({get_vn_time().strftime('%d/%m/%Y')})"
+            elif period == 'month':
+                incomes = get_income_by_period(user_id, 'month')
+                expenses = get_expenses_by_period(user_id, 'month')
+                title = f"THÁNG {get_vn_time().strftime('%m/%Y')}"
+            elif period == 'year':
+                incomes = get_income_by_period(user_id, 'year')
+                expenses = get_expenses_by_period(user_id, 'year')
+                title = f"NĂM {get_vn_time().strftime('%Y')}"
+            else:  # all time
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                
+                # Lấy tất cả thu nhập
+                c.execute('''SELECT currency, SUM(amount) FROM incomes 
+                             WHERE user_id = ? GROUP BY currency''', (user_id,))
+                income_rows = c.fetchall()
+                
+                # Lấy tất cả chi tiêu
+                c.execute('''SELECT currency, SUM(amount) FROM expenses 
+                             WHERE user_id = ? GROUP BY currency''', (user_id,))
+                expense_rows = c.fetchall()
+                
+                conn.close()
+                
+                # Chuyển thành dict
+                incomes = {'summary': {}}
+                expenses = {'summary': {}}
+                
+                for currency, total in income_rows:
+                    incomes['summary'][currency] = total
+                
+                for currency, total in expense_rows:
+                    expenses['summary'][currency] = total
+                
+                title = "TỔNG KẾT TẤT CẢ"
+            
+            # Tính cân đối
+            all_currencies = set(list(incomes['summary'].keys()) + list(expenses['summary'].keys()))
+            
+            balance_data = []
+            total_income_vnd = 0
+            total_expense_vnd = 0
+            
+            # Lấy tỷ giá USDT nếu cần
+            usdt_rate = get_usdt_vnd_rate()['vnd'] if 'USDT' in all_currencies else None
+            
+            for currency in all_currencies:
+                income = incomes['summary'].get(currency, 0)
+                expense = expenses['summary'].get(currency, 0)
+                balance = income - expense
+                
+                # Quy đổi ra VND để tính tổng
+                if currency == 'VND':
+                    total_income_vnd += income
+                    total_expense_vnd += expense
+                elif currency == 'USD' or currency == 'USDT':
+                    rate = usdt_rate if currency == 'USDT' else 25000  # USD tạm tính 25000
+                    total_income_vnd += income * rate
+                    total_expense_vnd += expense * rate
+                
+                balance_data.append({
+                    'currency': currency,
+                    'income': income,
+                    'expense': expense,
+                    'balance': balance,
+                    'status': 'positive' if balance > 0 else 'negative' if balance < 0 else 'zero'
+                })
+            
+            total_balance_vnd = total_income_vnd - total_expense_vnd
+            
+            return {
+                'title': title,
+                'period': period,
+                'balances': balance_data,
+                'total_income_vnd': total_income_vnd,
+                'total_expense_vnd': total_expense_vnd,
+                'total_balance_vnd': total_balance_vnd,
+                'total_balance_status': 'positive' if total_balance_vnd > 0 else 'negative' if total_balance_vnd < 0 else 'zero',
+                'income_count': incomes.get('total_count', 0),
+                'expense_count': expenses.get('total_count', 0)
+            }
+        except Exception as e:
+            logger.error(f"❌ Lỗi get_balance_summary: {e}")
+            return None
 
     def delete_expense(expense_id, user_id):
         conn = None
@@ -1695,7 +1843,7 @@ try:
             [InlineKeyboardButton("💰 THU NHẬP", callback_data="expense_income_menu"),
              InlineKeyboardButton("💸 CHI TIÊU", callback_data="expense_expense_menu")],
             [InlineKeyboardButton("📋 DANH MỤC", callback_data="expense_categories"),
-             InlineKeyboardButton("📊 BÁO CÁO", callback_data="expense_report_menu")],
+             InlineKeyboardButton("⚖️ CÂN ĐỐI", callback_data="balance_month")],
             [InlineKeyboardButton("📅 HÔM NAY", callback_data="expense_today"),
              InlineKeyboardButton("📅 THÁNG NÀY", callback_data="expense_month")],
             [InlineKeyboardButton("🔄 GẦN ĐÂY", callback_data="expense_recent"),
@@ -3185,6 +3333,68 @@ try:
             )
         else:
             await update.message.reply_text("❌ Lỗi khi thêm admin!")
+
+        @auto_update_user
+        async def balance_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+            """Xem cân đối thu chi"""
+            user_id = ctx.bot_data.get('effective_user_id', update.effective_user.id)
+            chat_id = update.effective_chat.id
+            chat_type = update.effective_chat.type
+            
+            # Kiểm tra quyền nếu trong group
+            if chat_type in ['group', 'supergroup']:
+                current_user = update.effective_user.id
+                if current_user != user_id and not check_permission(chat_id, current_user, 'view'):
+                    await update.message.reply_text("❌ Bạn không có quyền xem dữ liệu!")
+                    return
+            
+            # Xác định kỳ xem
+            period = 'month'  # mặc định
+            if ctx.args:
+                if ctx.args[0] in ['day', 'ngay', 'hôm nay', 'today']:
+                    period = 'day'
+                elif ctx.args[0] in ['month', 'thang', 'tháng', 'this month']:
+                    period = 'month'
+                elif ctx.args[0] in ['year', 'nam', 'năm', 'this year']:
+                    period = 'year'
+                elif ctx.args[0] in ['all', 'tat ca', 'tất cả', 'all time']:
+                    period = 'all'
+            
+            msg = await update.message.reply_text("🔄 Đang tính toán cân đối...")
+            
+            # Lấy thông tin user
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("SELECT username, first_name FROM users WHERE user_id = ?", (user_id,))
+            user_info = c.fetchone()
+            conn.close()
+            
+            user_name = f"@{user_info[0]}" if user_info and user_info[0] else (user_info[1] if user_info else "")
+            
+            # Tính cân đối
+            balance_data = get_balance_summary(user_id, period)
+            
+            if not balance_data:
+                await msg.edit_text("❌ Không thể tính cân đối!")
+                return
+            
+            # Format và gửi
+            balance_msg = format_balance_message(balance_data, user_name)
+            
+            # Thêm keyboard
+            keyboard = [
+                [InlineKeyboardButton("📅 Hôm nay", callback_data="balance_day"),
+                 InlineKeyboardButton("📅 Tháng này", callback_data="balance_month")],
+                [InlineKeyboardButton("📅 Năm nay", callback_data="balance_year"),
+                 InlineKeyboardButton("📊 Tất cả", callback_data="balance_all")],
+                [InlineKeyboardButton("🔙 Về menu", callback_data="back_to_expense")]
+            ]
+            
+            await msg.edit_text(
+                balance_msg,
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
 
     # ==================== PERMISSION COMMAND ====================
     async def perm_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -4825,6 +5035,48 @@ try:
                 await export_csv_handler(update, ctx)
                 return
 
+            elif data.startswith("balance_"):
+                period = data.replace("balance_", "")
+                current_user_id = query.from_user.id
+                chat_id = query.message.chat.id
+                effective_user_id = ctx.bot_data.get('effective_user_id', current_user_id)
+                
+                if current_user_id != effective_user_id and not check_permission(chat_id, current_user_id, 'view'):
+                    await query.edit_message_text("❌ Bạn không có quyền xem dữ liệu!")
+                    return
+                
+                # Lấy thông tin user
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                c.execute("SELECT username, first_name FROM users WHERE user_id = ?", (effective_user_id,))
+                user_info = c.fetchone()
+                conn.close()
+                
+                user_name = f"@{user_info[0]}" if user_info and user_info[0] else (user_info[1] if user_info else "")
+                
+                # Tính cân đối
+                balance_data = get_balance_summary(effective_user_id, period)
+                
+                if not balance_data:
+                    await query.edit_message_text("❌ Không thể tính cân đối!")
+                    return
+                
+                balance_msg = format_balance_message(balance_data, user_name)
+                
+                keyboard = [
+                    [InlineKeyboardButton("📅 Hôm nay", callback_data="balance_day"),
+                     InlineKeyboardButton("📅 Tháng này", callback_data="balance_month")],
+                    [InlineKeyboardButton("📅 Năm nay", callback_data="balance_year"),
+                     InlineKeyboardButton("📊 Tất cả", callback_data="balance_all")],
+                    [InlineKeyboardButton("🔙 Về menu", callback_data="back_to_expense")]
+                ]
+                
+                await query.edit_message_text(
+                    balance_msg,
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+
         except Exception as e:
             logger.error(f"Lỗi callback: {e}")
             await query.edit_message_text("❌ Có lỗi xảy ra!")
@@ -5186,6 +5438,9 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
             app.add_handler(CommandHandler("groupinfo", group_info_command))
             app.add_handler(CommandHandler("addadmin", add_group_admin))
             app.add_handler(CommandHandler("hide", hide_keyboard))
+            app.add_handler(CommandHandler("balance", balance_command))
+            app.add_handler(CommandHandler("canhdoi", balance_command))
+            app.add_handler(CommandHandler("thuchi", balance_command))
             app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_chat_members))
             app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
             app.add_handler(CallbackQueryHandler(handle_callback))
