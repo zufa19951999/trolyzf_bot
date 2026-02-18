@@ -3687,6 +3687,146 @@ try:
         elif text == "❓ HƯỚNG DẪN":
             await help_command(update, ctx)
 
+    # ==================== EXPORT CSV HANDLER ====================
+    async def export_csv_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Xử lý xuất CSV cho cả portfolio và expense"""
+        query = update.callback_query
+        user_id = ctx.bot_data.get('effective_user_id', query.from_user.id)
+        
+        await query.edit_message_text("🔄 Đang tạo file CSV...")
+        
+        try:
+            if query.data == "export_csv":
+                # Xuất portfolio
+                transactions = get_transaction_detail(user_id)
+                if not transactions:
+                    await query.edit_message_text(
+                        "📭 Không có dữ liệu portfolio để xuất!",
+                        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]])
+                    )
+                    return
+                
+                # Tạo file CSV
+                timestamp = get_vn_time().strftime('%Y%m%d_%H%M%S')
+                filename = f"portfolio_{user_id}_{timestamp}.csv"
+                filepath = os.path.join(EXPORT_DIR, filename)
+                
+                logger.info(f"📝 Đang tạo file CSV: {filepath}")
+                
+                # Ghi file
+                with open(filepath, 'w', newline='', encoding='utf-8-sig') as csvfile:
+                    writer = csv.writer(csvfile)
+                    writer.writerow(['ID', 'Mã coin', 'Số lượng', 'Giá mua (USD)', 'Ngày mua', 'Tổng vốn (USD)'])
+                    for tx in transactions:
+                        writer.writerow([tx[0], tx[1], tx[2], tx[3], tx[4], tx[5]])
+                
+                # Kiểm tra file đã được tạo chưa
+                if os.path.exists(filepath):
+                    file_size = os.path.getsize(filepath)
+                    logger.info(f"✅ File đã tạo: {filepath}, kích thước: {file_size} bytes")
+                    
+                    # Gửi file
+                    with open(filepath, 'rb') as f:
+                        await query.message.reply_document(
+                            document=f,
+                            filename=filename,
+                            caption=f"📊 *BÁO CÁO DANH MỤC ĐẦU TƯ*\n━━━━━━━━━━━━━━━━\n\n✅ Xuất thành công {len(transactions)} giao dịch!\n📁 File: `{filename}`\n🕐 {format_vn_time()}",
+                            parse_mode=ParseMode.MARKDOWN
+                        )
+                    
+                    # Xóa file tạm
+                    os.remove(filepath)
+                    logger.info(f"🗑 Đã xóa file tạm: {filepath}")
+                else:
+                    logger.error(f"❌ Không tìm thấy file sau khi tạo: {filepath}")
+                    await query.edit_message_text("❌ Lỗi: Không thể tạo file CSV!")
+                    return
+                
+                # Quay lại menu
+                await query.edit_message_text(
+                    f"💰 *MENU ĐẦU TƯ COIN*\n━━━━━━━━━━━━━━━━\n\n🕐 {format_vn_time()}",
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=get_invest_menu_keyboard(user_id, query.message.chat.id)
+                )
+                
+            elif query.data == "expense_export":
+                # Xuất báo cáo chi tiêu
+                expenses = get_recent_expenses(user_id, 1000)  # Lấy nhiều hơn
+                incomes = get_recent_incomes(user_id, 1000)
+                
+                if not expenses and not incomes:
+                    await query.edit_message_text(
+                        "📭 Không có dữ liệu chi tiêu để xuất!",
+                        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_expense")]])
+                    )
+                    return
+                
+                timestamp = get_vn_time().strftime('%Y%m%d_%H%M%S')
+                filename = f"expense_report_{user_id}_{timestamp}.csv"
+                filepath = os.path.join(EXPORT_DIR, filename)
+                
+                logger.info(f"📝 Đang tạo file CSV: {filepath}")
+                
+                with open(filepath, 'w', newline='', encoding='utf-8-sig') as csvfile:
+                    writer = csv.writer(csvfile)
+                    
+                    # Thu nhập
+                    writer.writerow(['=== THU NHẬP ==='])
+                    writer.writerow(['ID', 'Ngày', 'Nguồn', 'Số tiền', 'Loại tiền', 'Ghi chú'])
+                    for inc in incomes:
+                        writer.writerow([inc[0], inc[4], inc[2], inc[1], inc[5], inc[3]])
+                    
+                    writer.writerow([])  # Dòng trống
+                    
+                    # Chi tiêu
+                    writer.writerow(['=== CHI TIÊU ==='])
+                    writer.writerow(['ID', 'Ngày', 'Danh mục', 'Số tiền', 'Loại tiền', 'Ghi chú'])
+                    for exp in expenses:
+                        writer.writerow([exp[0], exp[4], exp[1], exp[2], exp[5], exp[3]])
+                
+                # Kiểm tra file đã được tạo chưa
+                if os.path.exists(filepath):
+                    file_size = os.path.getsize(filepath)
+                    logger.info(f"✅ File đã tạo: {filepath}, kích thước: {file_size} bytes")
+                    
+                    # Gửi file
+                    with open(filepath, 'rb') as f:
+                        await query.message.reply_document(
+                            document=f,
+                            filename=filename,
+                            caption=f"📊 *BÁO CÁO THU CHI*\n━━━━━━━━━━━━━━━━\n\n✅ Xuất thành công!\n• Thu nhập: {len(incomes)} giao dịch\n• Chi tiêu: {len(expenses)} giao dịch\n📁 File: `{filename}`\n\n🕐 {format_vn_time()}",
+                            parse_mode=ParseMode.MARKDOWN
+                        )
+                    
+                    os.remove(filepath)
+                    logger.info(f"🗑 Đã xóa file tạm: {filepath}")
+                else:
+                    logger.error(f"❌ Không tìm thấy file sau khi tạo: {filepath}")
+                    await query.edit_message_text("❌ Lỗi: Không thể tạo file CSV!")
+                    return
+                
+                # Quay lại menu
+                await query.edit_message_text(
+                    f"💰 *QUẢN LÝ CHI TIÊU*\n━━━━━━━━━━━━━━━━\n\n🕐 {format_vn_time()}",
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=get_expense_menu_keyboard()
+                )
+                
+        except Exception as e:
+            logger.error(f"❌ Lỗi export CSV: {e}", exc_info=True)
+            await query.edit_message_text(
+                f"❌ Lỗi khi xuất CSV: {str(e)[:200]}",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_main")]])
+            )
+            
+            # Dọn dẹp file nếu có lỗi
+            try:
+                if 'filepath' in locals() and os.path.exists(filepath):
+                    os.remove(filepath)
+                    logger.info(f"🗑 Đã dọn dẹp file lỗi: {filepath}")
+            except:
+                pass
+            
     # ==================== CALLBACK HANDLER ====================
     async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -4315,44 +4455,6 @@ try:
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]])
                 )
             
-            elif data == "export_csv":
-                uid = query.from_user.id
-                await query.edit_message_text("🔄 Đang tạo file CSV...")
-                
-                transactions = get_transaction_detail(uid)
-                if not transactions:
-                    await query.edit_message_text("📭 Không có dữ liệu để xuất!")
-                    return
-                
-                timestamp = get_vn_time().strftime('%Y%m%d_%H%M%S')
-                filename = f"portfolio_{uid}_{timestamp}.csv"
-                filepath = os.path.join(EXPORT_DIR, filename)
-                
-                with open(filepath, 'w', newline='', encoding='utf-8-sig') as csvfile:
-                    writer = csv.writer(csvfile)
-                    writer.writerow(['ID', 'Mã coin', 'Số lượng', 'Giá mua (USD)', 'Ngày mua', 'Tổng vốn (USD)'])
-                    for tx in transactions:
-                        writer.writerow([tx[0], tx[1], tx[2], tx[3], tx[4], tx[5]])
-                
-                try:
-                    with open(filepath, 'rb') as f:
-                        await query.message.reply_document(
-                            document=f,
-                            filename=filename,
-                            caption=f"📊 *BÁO CÁO DANH MỤC*\n━━━━━━━━━━━━━━━━\n\n✅ Xuất thành công!\n🕐 {format_vn_time()}",
-                            parse_mode=ParseMode.MARKDOWN
-                        )
-                    os.remove(filepath)
-                    
-                    await query.edit_message_text(
-                        f"💰 *MENU ĐẦU TƯ COIN*\n━━━━━━━━━━━━━━━━\n\n🕐 {format_vn_time()}",
-                        parse_mode=ParseMode.MARKDOWN,
-                        reply_markup=get_invest_menu_keyboard(uid, query.message.chat.id)
-                    )
-                except Exception as e:
-                    logger.error(f"Lỗi export: {e}")
-                    await query.edit_message_text("❌ Lỗi khi gửi file!")
-            
             elif data == "admin_panel":
                 uid = query.from_user.id
                 group_id = query.message.chat.id
@@ -4719,62 +4821,9 @@ try:
                         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_expense")]])
                     )
             
-            elif data == "expense_export":
-                try:
-                    uid = query.from_user.id
-                    await query.edit_message_text("🔄 Đang tạo file báo cáo...")
-                    
-                    expenses = get_recent_expenses(uid, 100)
-                    incomes = get_recent_incomes(uid, 100)
-                    
-                    if not expenses and not incomes:
-                        await query.edit_message_text("📭 Không có dữ liệu để xuất!")
-                        return
-                    
-                    timestamp = get_vn_time().strftime('%Y%m%d_%H%M%S')
-                    filename = f"expense_report_{uid}_{timestamp}.csv"
-                    filepath = os.path.join(EXPORT_DIR, filename)
-                    
-                    with open(filepath, 'w', newline='', encoding='utf-8-sig') as csvfile:
-                        writer = csv.writer(csvfile)
-                        
-                        writer.writerow(['=== THU NHẬP ==='])
-                        writer.writerow(['ID', 'Ngày', 'Nguồn', 'Số tiền', 'Loại tiền', 'Ghi chú'])
-                        for inc in incomes:
-                            writer.writerow([inc[0], inc[4], inc[2], inc[1], inc[5], inc[3]])
-                        
-                        writer.writerow([])
-                        writer.writerow(['=== CHI TIÊU ==='])
-                        writer.writerow(['ID', 'Ngày', 'Danh mục', 'Số tiền', 'Loại tiền', 'Ghi chú'])
-                        for exp in expenses:
-                            writer.writerow([exp[0], exp[4], exp[1], exp[2], exp[5], exp[3]])
-                    
-                    try:
-                        with open(filepath, 'rb') as f:
-                            await query.message.reply_document(
-                                document=f,
-                                filename=filename,
-                                caption=f"📊 *BÁO CÁO CHI TIÊU*\n━━━━━━━━━━━━━━━━\n\n✅ Xuất thành công!\n🕐 {format_vn_time()}",
-                                parse_mode=ParseMode.MARKDOWN
-                            )
-                        os.remove(filepath)
-                        await query.edit_message_text(
-                            "💰 *QUẢN LÝ CHI TIÊU*",
-                            parse_mode=ParseMode.MARKDOWN,
-                            reply_markup=get_expense_menu_keyboard()
-                        )
-                    except Exception as e:
-                        logger.error(f"Lỗi gửi file: {e}")
-                        await query.edit_message_text("❌ Lỗi khi gửi file!")
-                except Exception as e:
-                    logger.error(f"Lỗi expense_export: {e}")
-                    await query.edit_message_text("❌ Có lỗi xảy ra khi xuất file!")
-            
-            else:
-                await query.edit_message_text("❌ Không hiểu lệnh!")
-        except Exception as e:
-            logger.error(f"Lỗi callback: {e}")
-            await query.edit_message_text("❌ Có lỗi xảy ra!")
+            elif data == "export_csv" or data == "expense_export":
+                await export_csv_handler(update, ctx)
+                return
     
     # ==================== PORTFOLIO STATS HELPER ====================
     def get_portfolio_stats(user_id):
@@ -5033,6 +5082,21 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
         logger.info(f"💾 Memory limit: {render_config.memory_limit}MB")
         logger.info(f"⚙️ CPU limit: {render_config.cpu_limit}")
         logger.info(f"🌐 Render URL: {render_config.render_url}")
+
+        # Kiểm tra và tạo thư mục export
+        EXPORT_DIR = os.path.join(DATA_DIR, 'exports')
+        os.makedirs(EXPORT_DIR, exist_ok=True)
+        logger.info(f"📁 Export directory: {EXPORT_DIR}")
+        
+        # Kiểm tra quyền ghi file
+        test_file = os.path.join(EXPORT_DIR, 'test.txt')
+        try:
+            with open(test_file, 'w') as f:
+                f.write('test')
+            os.remove(test_file)
+            logger.info("✅ Export directory is writable")
+        except Exception as e:
+            logger.error(f"❌ Export directory not writable: {e}")
         
         # Khởi tạo database
         if not init_database():
