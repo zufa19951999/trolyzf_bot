@@ -2342,6 +2342,206 @@ try:
         except ValueError:
             await update.message.reply_text("❌ ID không hợp lệ!")
 
+    @auto_update_user
+    async def new_chat_members(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Xử lý khi có thành viên mới vào group"""
+        for new_member in update.message.new_chat_members:
+            # Cập nhật user info
+            await update_user_info_async(new_member)
+            
+            # Nếu là bot thì không cần xử lý
+            if new_member.is_bot:
+                continue
+            
+            chat_id = update.effective_chat.id
+            chat_type = update.effective_chat.type
+            
+            # Chỉ xử lý trong group
+            if chat_type not in ['group', 'supergroup']:
+                continue
+            
+            # Kiểm tra xem group đã có owner chưa
+            owner_id = get_group_owner(chat_id)
+            if not owner_id:
+                continue
+            
+            # Kiểm tra xem người mới có phải là owner không
+            if new_member.id == owner_id:
+                continue
+            
+            # Kiểm tra xem người này có phải là admin Telegram không
+            try:
+                admins = await ctx.bot.get_chat_administrators(chat_id)
+                is_telegram_admin = False
+                for admin in admins:
+                    if admin.user.id == new_member.id:
+                        is_telegram_admin = True
+                        break
+                
+                if is_telegram_admin:
+                    # Nếu là admin Telegram, tự động cấp quyền view cơ bản
+                    conn = sqlite3.connect(DB_PATH)
+                    c = conn.cursor()
+                    
+                    # Kiểm tra xem đã có quyền chưa
+                    c.execute("SELECT * FROM group_admins WHERE group_id = ? AND admin_id = ?", 
+                              (chat_id, new_member.id))
+                    exists = c.fetchone()
+                    
+                    if not exists:
+                        # Cấp quyền view cơ bản
+                        permissions = {'view': 1, 'edit': 0, 'delete': 0, 'manage': 0}
+                        
+                        created_at = get_vn_time().strftime("%Y-%m-%d %H:%M:%S")
+                        c.execute('''INSERT INTO group_admins 
+                                     (group_id, admin_id, granted_by, can_view, can_edit, can_delete, can_manage, created_at)
+                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                                  (chat_id, new_member.id, owner_id,
+                                   permissions['view'], permissions['edit'], 
+                                   permissions['delete'], permissions['manage'],
+                                   created_at))
+                        conn.commit()
+                        
+                        logger.info(f"✅ Auto-granted view permission for new Telegram admin @{new_member.username} in {chat_id}")
+                    
+                    conn.close()
+            except Exception as e:
+                logger.error(f"❌ Lỗi xử lý new member: {e}")
+
+    @auto_update_user
+    async def perm_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Quản lý phân quyền trong group"""
+        user_id = update.effective_user.id
+        chat_id = update.effective_chat.id
+        chat_type = update.effective_chat.type
+        
+        if chat_type not in ['group', 'supergroup']:
+            await update.message.reply_text("❌ Lệnh này chỉ dùng trong nhóm!")
+            return
+        
+        # Chỉ owner và admin có quyền manage mới dùng được
+        owner_id = get_group_owner(chat_id)
+        if user_id != owner_id and not check_admin_permission(chat_id, user_id, 'manage'):
+            await update.message.reply_text("❌ Bạn không có quyền quản lý phân quyền!")
+            return
+        
+        if not ctx.args:
+            msg = (
+                "🔐 *QUẢN LÝ PHÂN QUYỀN*\n━━━━━━━━━━━━━━━━\n\n"
+                "*Các lệnh:*\n"
+                "• `/perm list` - Xem danh sách admin\n"
+                "• `/perm grant @user view` - Cấp quyền xem\n"
+                "• `/perm grant @user edit` - Cấp quyền sửa\n"
+                "• `/perm grant @user delete` - Cấp quyền xóa\n"
+                "• `/perm grant @user manage` - Cấp quyền quản lý\n"
+                "• `/perm grant @user full` - Cấp toàn quyền\n"
+                "• `/perm revoke @user` - Thu hồi quyền\n\n"
+                f"🕐 {format_vn_time_short()}"
+            )
+            await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+            return
+        
+        if ctx.args[0] == "list":
+            admins = get_all_admins(chat_id)
+            if not admins:
+                await update.message.reply_text("📭 Chưa có admin nào!")
+                return
+            
+            msg = "👑 *DANH SÁCH ADMIN*\n━━━━━━━━━━━━━━━━\n\n"
+            for admin in admins:
+                admin_id, view, edit, delete, manage, username, first_name, created_at = admin
+                
+                display = f"@{username}" if username else first_name or f"User {admin_id}"
+                permissions = []
+                if view: permissions.append("👁 Xem")
+                if edit: permissions.append("✏️ Sửa")
+                if delete: permissions.append("🗑 Xóa")
+                if manage: permissions.append("🔐 Quản lý")
+                
+                msg += f"• {display} (`{admin_id}`)\n  Quyền: {', '.join(permissions)}\n  Ngày thêm: {created_at[:10]}\n\n"
+            
+            msg += f"🕐 {format_vn_time_short()}"
+            await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+            return
+        
+        if ctx.args[0] == "grant" and len(ctx.args) >= 3:
+            target = ctx.args[1]
+            perm_type = ctx.args[2].lower()
+            
+            # Tìm user ID
+            if target.startswith('@'):
+                username = target[1:]
+                target_id = get_user_id_by_username(username)
+                if not target_id:
+                    await update.message.reply_text(f"❌ Không tìm thấy user {target}")
+                    return
+            else:
+                try:
+                    target_id = int(target)
+                except:
+                    await update.message.reply_text("❌ ID không hợp lệ!")
+                    return
+            
+            # Xác định quyền
+            permissions = {'view': 0, 'edit': 0, 'delete': 0, 'manage': 0}
+            
+            if perm_type == 'view':
+                permissions['view'] = 1
+            elif perm_type == 'edit':
+                permissions['view'] = 1
+                permissions['edit'] = 1
+            elif perm_type == 'delete':
+                permissions['view'] = 1
+                permissions['delete'] = 1
+            elif perm_type == 'manage':
+                permissions['manage'] = 1
+            elif perm_type == 'full':
+                permissions['view'] = 1
+                permissions['edit'] = 1
+                permissions['delete'] = 1
+                permissions['manage'] = 1
+            else:
+                await update.message.reply_text("❌ Loại quyền không hợp lệ!")
+                return
+            
+            if grant_admin_permission(chat_id, target_id, user_id, permissions):
+                await update.message.reply_text(f"✅ Đã cấp quyền {perm_type} cho {target}")
+            else:
+                await update.message.reply_text("❌ Lỗi khi cấp quyền!")
+            return
+        
+        if ctx.args[0] == "revoke" and len(ctx.args) >= 2:
+            target = ctx.args[1]
+            
+            if target.startswith('@'):
+                username = target[1:]
+                target_id = get_user_id_by_username(username)
+                if not target_id:
+                    await update.message.reply_text(f"❌ Không tìm thấy user {target}")
+                    return
+            else:
+                try:
+                    target_id = int(target)
+                except:
+                    await update.message.reply_text("❌ ID không hợp lệ!")
+                    return
+            
+            if target_id == user_id:
+                await update.message.reply_text("❌ Không thể tự thu hồi quyền của chính mình!")
+                return
+            
+            if target_id == get_group_owner(chat_id):
+                await update.message.reply_text("❌ Không thể thu hồi quyền của chủ sở hữu!")
+                return
+            
+            if revoke_admin_permission(chat_id, target_id):
+                await update.message.reply_text(f"✅ Đã thu hồi quyền của {target}")
+            else:
+                await update.message.reply_text(f"❌ Không tìm thấy {target} trong danh sách admin!")
+            return
+        
+        await update.message.reply_text("❌ Cú pháp không đúng! Xem hướng dẫn: /perm")
+    
     # ==================== EXPENSE SHORTCUT HANDLERS ====================
     async def expense_shortcut_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         owner_id = ctx.bot_data.get('effective_user_id', update.effective_user.id)
