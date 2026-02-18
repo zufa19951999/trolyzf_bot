@@ -1168,19 +1168,22 @@ try:
                 conn.close()
 
     def get_all_admins(group_id):
+        """Lấy danh sách tất cả admin trong group"""
         conn = None
         try:
             conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
             
-            # Lấy thông tin admin kèm username từ bảng users
-            c.execute('''SELECT p.user_id, p.can_view_all, p.can_edit_all, p.can_delete_all, p.can_manage_perms,
-                                u.username, u.first_name
-                         FROM permissions p
-                         LEFT JOIN users u ON p.user_id = u.user_id
-                         WHERE p.group_id = ?
-                         ORDER BY p.created_at''', (group_id,))
-            return c.fetchall()
+            # SỬA: Dùng bảng group_admins thay vì permissions
+            c.execute('''SELECT ga.admin_id, ga.can_view, ga.can_edit, ga.can_delete, ga.can_manage,
+                                u.username, u.first_name, ga.created_at
+                         FROM group_admins ga
+                         LEFT JOIN users u ON ga.admin_id = u.user_id
+                         WHERE ga.group_id = ?
+                         ORDER BY ga.created_at''', (group_id,))
+            admins = c.fetchall()
+            conn.close()
+            return admins
         except Exception as e:
             logger.error(f"❌ Lỗi get_all_admins: {e}")
             return []
@@ -1216,6 +1219,25 @@ try:
             return True
         except Exception as e:
             logger.error(f"❌ Lỗi grant admin: {e}")
+            return False
+
+    def revoke_admin_permission(group_id, admin_id):
+        """Thu hồi quyền admin"""
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("DELETE FROM group_admins WHERE group_id = ? AND admin_id = ?", 
+                      (group_id, admin_id))
+            conn.commit()
+            affected = c.rowcount
+            conn.close()
+            
+            if affected > 0:
+                logger.info(f"✅ Revoked admin permissions from {admin_id} in group {group_id}")
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"❌ Lỗi revoke admin: {e}")
             return False
 
     def check_admin_permission(group_id, admin_id, permission='view'):
@@ -3582,6 +3604,109 @@ try:
             )
         else:
             await update.message.reply_text("❌ Lỗi khi thêm admin!")
+
+    @auto_update_user
+    @require_group_permission('view')
+    async def list_admin_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Xem danh sách admin trong group"""
+        chat_id = update.effective_chat.id
+        chat_type = update.effective_chat.type
+        
+        if chat_type not in ['group', 'supergroup']:
+            await update.message.reply_text("❌ Lệnh này chỉ dùng trong nhóm!")
+            return
+        
+        # Lấy danh sách admin từ database
+        admins = get_all_admins(chat_id)
+        
+        if not admins:
+            await update.message.reply_text("📭 Chưa có admin nào trong group!")
+            return
+        
+        msg = "👑 *DANH SÁCH ADMIN*\n━━━━━━━━━━━━━━━━\n\n"
+        for admin in admins:
+            # Kiểm tra cấu trúc dữ liệu trả về từ get_all_admins
+            if len(admin) >= 7:
+                admin_id, view, edit, delete, manage, username, first_name = admin
+            else:
+                # Nếu là cấu trúc cũ
+                admin_id, view, edit, delete, manage = admin[:5]
+                username = None
+                first_name = None
+            
+            # Tạo tên hiển thị
+            if username:
+                display = f"@{username}"
+            elif first_name:
+                display = first_name
+            else:
+                display = f"User {admin_id}"
+            
+            # Liệt kê quyền
+            permissions = []
+            if view: permissions.append("👁 Xem")
+            if edit: permissions.append("✏️ Sửa")
+            if delete: permissions.append("🗑 Xóa")
+            if manage: permissions.append("🔐 Quản lý")
+            
+            msg += f"• {display} (`{admin_id}`)\n"
+            msg += f"  Quyền: {', '.join(permissions)}\n"
+            msg += f"  Ngày thêm: {admin[7][:10] if len(admin) > 7 else 'N/A'}\n\n"
+        
+        msg += f"🕐 {format_vn_time()}"
+        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+
+    @auto_update_user
+    @require_group_permission('manage')
+        async def remove_admin_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Xóa admin khỏi group"""
+        chat_id = update.effective_chat.id
+        chat_type = update.effective_chat.type
+        
+        if chat_type not in ['group', 'supergroup']:
+            await update.message.reply_text("❌ Lệnh này chỉ dùng trong nhóm!")
+            return
+        
+        if not ctx.args:
+            await update.message.reply_text(
+                "📝 *HƯỚNG DẪN XÓA ADMIN*\n\n"
+                "• `/removeadmin @user` - Xóa admin\n"
+                "• `/removeadmin ID` - Xóa admin bằng ID\n\n"
+                "Ví dụ: `/removeadmin @john`",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+        
+        target = ctx.args[0]
+        
+        # Tìm user ID
+        if target.startswith('@'):
+            username = target[1:]
+            admin_id = get_user_id_by_username(username)
+            if not admin_id:
+                await update.message.reply_text(f"❌ Không tìm thấy user {target}")
+                return
+        else:
+            try:
+                admin_id = int(target)
+            except:
+                await update.message.reply_text("❌ ID không hợp lệ!")
+                return
+        
+        # Không cho xóa chính mình
+        if admin_id == update.effective_user.id:
+            await update.message.reply_text("❌ Không thể tự xóa quyền admin của chính mình!")
+            return
+        
+        # Kiểm tra xem có phải owner không
+        if admin_id == get_group_owner(chat_id):
+            await update.message.reply_text("❌ Không thể xóa chủ sở hữu group!")
+            return
+        
+        if revoke_admin_permission(chat_id, admin_id):
+            await update.message.reply_text(f"✅ Đã xóa {target} khỏi danh sách admin!")
+        else:
+            await update.message.reply_text(f"❌ Không tìm thấy {target} trong danh sách admin!")
 
     # ==================== PERMISSION COMMAND ====================
     async def perm_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
