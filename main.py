@@ -1261,26 +1261,15 @@ try:
                 
                 title = "TỔNG KẾT TẤT CẢ"
             
+            # Lấy tất cả các loại tiền tệ
             all_currencies = set(list(incomes['summary'].keys()) + list(expenses['summary'].keys()))
             
             balance_data = []
-            total_income_vnd = 0
-            total_expense_vnd = 0
-            
-            usdt_rate = get_usdt_vnd_rate()['vnd'] if 'USDT' in all_currencies else None
             
             for currency in all_currencies:
                 income = incomes['summary'].get(currency, 0)
                 expense = expenses['summary'].get(currency, 0)
                 balance = income - expense
-                
-                if currency == 'VND':
-                    total_income_vnd += income
-                    total_expense_vnd += expense
-                elif currency == 'USD' or currency == 'USDT':
-                    rate = usdt_rate if currency == 'USDT' else 25000
-                    total_income_vnd += income * rate
-                    total_expense_vnd += expense * rate
                 
                 balance_data.append({
                     'currency': currency,
@@ -1290,16 +1279,10 @@ try:
                     'status': 'positive' if balance > 0 else 'negative' if balance < 0 else 'zero'
                 })
             
-            total_balance_vnd = total_income_vnd - total_expense_vnd
-            
             return {
                 'title': title,
                 'period': period,
                 'balances': balance_data,
-                'total_income_vnd': total_income_vnd,
-                'total_expense_vnd': total_expense_vnd,
-                'total_balance_vnd': total_balance_vnd,
-                'total_balance_status': 'positive' if total_balance_vnd > 0 else 'negative' if total_balance_vnd < 0 else 'zero',
                 'income_count': incomes.get('total_count', 0),
                 'expense_count': expenses.get('total_count', 0)
             }
@@ -1311,47 +1294,72 @@ try:
         if not balance_data:
             return "❌ Không có dữ liệu để hiển thị!"
         
+        # Icon và tên cho các loại tiền tệ
+        currency_icons = {
+            'VND': '🇻🇳',
+            'USD': '🇺🇸',
+            'USDT': '💵',
+            'KHR': '🇰🇭',
+            'LKR': '🇱🇰'
+        }
+        
         msg = f"⚖️ *CÂN ĐỐI THU CHI - {balance_data['title']}*"
         if user_name:
             msg += f" - {user_name}"
         msg += "\n━━━━━━━━━━━━━━━━\n\n"
         
+        # Hiển thị theo từng loại tiền tệ
         for b in balance_data['balances']:
             currency = b['currency']
             income = b['income']
             expense = b['expense']
             balance = b['balance']
             
-            if income > 0 or expense > 0:
-                msg += f"*{currency}:*\n"
-                if income > 0:
-                    msg += f"  💰 Thu: {format_currency_simple(income, currency)}\n"
-                if expense > 0:
-                    msg += f"  💸 Chi: {format_currency_simple(expense, currency)}\n"
-                
-                if balance > 0:
-                    msg += f"  ✅ Dư: {format_currency_simple(balance, currency)}\n"
-                elif balance < 0:
-                    msg += f"  ❌ Thiếu: {format_currency_simple(abs(balance), currency)}\n"
-                else:
-                    msg += f"  ➖ Cân bằng\n"
-                msg += "\n"
-        
-        if balance_data['total_income_vnd'] > 0 or balance_data['total_expense_vnd'] > 0:
-            msg += "*📊 TỔNG KẾT (VND):*\n"
-            msg += f"  💰 Tổng thu: {format_currency_simple(balance_data['total_income_vnd'], 'VND')}\n"
-            msg += f"  💸 Tổng chi: {format_currency_simple(balance_data['total_expense_vnd'], 'VND')}\n"
+            # Icon cho loại tiền
+            icon = currency_icons.get(currency, '💱')
             
-            total_balance = balance_data['total_balance_vnd']
-            if total_balance > 0:
-                msg += f"  ✅ Còn lại: {format_currency_simple(total_balance, 'VND')}\n"
-            elif total_balance < 0:
-                msg += f"  ❌ Thiếu: {format_currency_simple(abs(total_balance), 'VND')}\n"
+            # Header cho loại tiền
+            msg += f"{icon} *{currency}*\n"
+            msg += "```\n"
+            
+            # Thu nhập
+            if income > 0:
+                msg += f"💰 Thu:    {format_currency_simple(income, currency):>15}\n"
             else:
-                msg += f"  ➖ Cân bằng\n"
+                msg += f"💰 Thu:    {'0':>15}\n"
+            
+            # Chi tiêu
+            if expense > 0:
+                msg += f"💸 Chi:    {format_currency_simple(expense, currency):>15}\n"
+            else:
+                msg += f"💸 Chi:    {'0':>15}\n"
+            
+            # Đường kẻ
+            msg += f"{'─'*25}\n"
+            
+            # Cân đối
+            if balance > 0:
+                msg += f"✅ Dư:     {format_currency_simple(balance, currency):>15}\n"
+            elif balance < 0:
+                msg += f"❌ Thiếu:  {format_currency_simple(abs(balance), currency):>15}\n"
+            else:
+                msg += f"➖ Cân bằng: {'0':>15}\n"
+            
+            msg += "```\n"
         
-        msg += f"\n📊 Thống kê: {balance_data['income_count']} khoản thu, {balance_data['expense_count']} khoản chi"
-        msg += f"\n\n🕐 {format_vn_time()}"
+        # Thống kê số giao dịch
+        msg += f"\n📊 *THỐNG KÊ:*\n"
+        msg += f"• {balance_data['income_count']} khoản thu\n"
+        msg += f"• {balance_data['expense_count']} khoản chi\n"
+        
+        # Tổng số dư theo từng loại tiền (không quy đổi)
+        msg += f"\n💎 *SỐ DƯ HIỆN TẠI:*\n"
+        for b in balance_data['balances']:
+            if b['balance'] != 0:
+                icon = currency_icons.get(b['currency'], '💱')
+                msg += f"• {icon} {format_currency_simple(b['balance'], b['currency'])}\n"
+        
+        msg += f"\n🕐 {format_vn_time()}"
         
         return msg
 
