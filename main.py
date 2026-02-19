@@ -2510,19 +2510,35 @@ try:
         chat_type = update.effective_chat.type
         current_user = update.effective_user.id
         
-        # Kiểm tra quyền nếu trong group
-        if chat_type in ['group', 'supergroup']:
+        # DEBUG: In ra log để kiểm tra
+        logger.info(f"🔍 BALANCE: current_user={current_user}, owner_id={owner_id}, chat_type={chat_type}")
+        
+        # Nếu là private chat -> ai cũng xem được data của mình
+        if chat_type == 'private':
+            pass  # Cho phép
+        else:
+            # TRONG GROUP: kiểm tra quyền
             # Nếu là owner group -> cho phép
             if is_group_owner(chat_id, current_user):
-                pass  # Cho phép
-            # Nếu là admin đã được cấp quyền view
+                logger.info(f"✅ User {current_user} là owner group")
+                pass
+            # Nếu là admin đã được cấp quyền
             elif check_admin_permission(chat_id, current_user, 'view'):
-                pass  # Cho phép
-            # Còn lại là không có quyền
-            elif current_user != owner_id:
+                logger.info(f"✅ User {current_user} có quyền view")
+                pass
+            # Nếu đang xem data của chính mình (trường hợp đặc biệt)
+            elif current_user == owner_id:
+                logger.info(f"✅ User {current_user} đang xem data của chính mình")
+                pass
+            else:
+                logger.warning(f"❌ User {current_user} không có quyền xem data của owner {owner_id}")
                 await update.message.reply_text(
                     "❌ Bạn không có quyền xem dữ liệu!\n\n"
-                    "Vui lòng liên hệ chủ sở hữu group để được cấp quyền.",
+                    f"• Quyền của bạn: {check_admin_permission(chat_id, current_user, 'view')}\n"
+                    f"• Là owner group: {is_group_owner(chat_id, current_user)}\n"
+                    f"• ID của bạn: `{current_user}`\n"
+                    f"• ID chủ sở hữu: `{owner_id}`\n\n"
+                    f"Vui lòng liên hệ chủ sở hữu group để được cấp quyền.",
                     parse_mode=ParseMode.MARKDOWN
                 )
                 return
