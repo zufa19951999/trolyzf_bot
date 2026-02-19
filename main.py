@@ -3968,7 +3968,7 @@ try:
         
         msg += "*📋 CÁC BẢNG:*\n"
         for table in tables:
-            msg += f"• {table[0]}\n"
+            msg += f"• `{escape_markdown(table[0])}`\n"
         
         msg += "\n"
         
@@ -3989,10 +3989,21 @@ try:
                 admins = c.fetchall()
                 for admin in admins:
                     admin_id, view, edit, delete, manage, username, first_name, created = admin
-                    display = f"@{username}" if username else first_name or f"User {admin_id}"
+                    
+                    # Escape các giá trị
+                    safe_username = escape_markdown(username) if username else "None"
+                    safe_firstname = escape_markdown(first_name) if first_name else ""
+                    
+                    if username:
+                        display = f"@{safe_username}"
+                    elif first_name:
+                        display = safe_firstname
+                    else:
+                        display = f"User {admin_id}"
+                    
                     msg += f"\n  • {display} (`{admin_id}`)\n"
-                    msg += f"    Quyền: {'👁 ' if view else '❌'}{'✏️ ' if edit else '❌'}{'🗑 ' if delete else '❌'}{'🔐 ' if manage else '❌'}\n"
-                    msg += f"    Ngày thêm: {created[:10]}\n"
+                    msg += f"    Quyền: {'✅' if view else '❌'}👁 {'✅' if edit else '❌'}✏️ {'✅' if delete else '❌'}🗑 {'✅' if manage else '❌'}🔐\n"
+                    msg += f"    Ngày thêm: {created[:10] if created else 'N/A'}\n"
         else:
             msg += "❌ Bảng `group_admins` CHƯA TỒN TẠI!\n"
             msg += "🔄 Đang tạo bảng...\n"
@@ -4019,7 +4030,14 @@ try:
             # Lấy thông tin owner
             c.execute("SELECT username, first_name FROM users WHERE user_id = ?", (owner_id,))
             owner_info = c.fetchone()
-            owner_display = f"@{owner_info[0]}" if owner_info and owner_info[0] else (owner_info[1] if owner_info else f"User {owner_id}")
+            
+            if owner_info and owner_info[0]:
+                owner_display = f"@{escape_markdown(owner_info[0])}"
+            elif owner_info and owner_info[1]:
+                owner_display = escape_markdown(owner_info[1])
+            else:
+                owner_display = f"User {owner_id}"
+                
             msg += f"{owner_display} (`{owner_id}`)\n"
         else:
             msg += "Chưa có owner\n"
@@ -4028,18 +4046,18 @@ try:
         
         conn.close()
         
-        msg += f"\n🕐 {format_vn_time()}"
+        msg += f"\n🕐 {escape_markdown(format_vn_time())}"
         
-        # Gửi tin nhắn (chia nhỏ nếu quá dài)
-        if len(msg) > 4000:
-            chunks = [msg[i:i+3500] for i in range(0, len(msg), 3500)]
-            for i, chunk in enumerate(chunks, 1):
-                await update.message.reply_text(
-                    f"{chunk}\n\n*(Phần {i}/{len(chunks)})*",
-                    parse_mode=ParseMode.MARKDOWN
-                )
-        else:
+        # Gửi tin nhắn KHÔNG dùng parse_mode để tránh lỗi
+        try:
+            # Thử gửi với parse_mode Markdown
             await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+        except Exception as e:
+            # Nếu lỗi, gửi không parse_mode
+            logger.error(f"Lỗi gửi Markdown: {e}")
+            # Gửi bản plain text
+            plain_msg = msg.replace('*', '').replace('`', '').replace('_', '')
+            await update.message.reply_text(plain_msg)
 
     # ==================== PERMISSION COMMAND ====================
     async def perm_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
