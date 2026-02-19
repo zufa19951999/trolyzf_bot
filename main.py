@@ -1189,12 +1189,13 @@ try:
                           created_at TEXT,
                           UNIQUE(group_id, admin_id))''')
             
-            logger.info(f"📝 Đang cấp quyền cho admin {admin_id} trong group {group_id}")
-            logger.info(f"📝 Quyền: {permissions}")
+            print(f"🔍 DEBUG: Đang thêm admin {admin_id} vào group {group_id}")
+            print(f"🔍 DEBUG: Quyền: {permissions}")
             
             # Xóa quyền cũ nếu có
             c.execute("DELETE FROM group_admins WHERE group_id = ? AND admin_id = ?", 
                       (group_id, admin_id))
+            print(f"🔍 DEBUG: Đã xóa quyền cũ")
             
             # Thêm quyền mới
             c.execute('''INSERT INTO group_admins 
@@ -1206,8 +1207,10 @@ try:
                        permissions.get('delete', 0),
                        permissions.get('manage', 0),
                        created_at))
+            print(f"🔍 DEBUG: Đã thêm quyền mới")
             
             conn.commit()
+            print(f"🔍 DEBUG: Đã commit")
             
             # KIỂM TRA LẠI
             c.execute("SELECT * FROM group_admins WHERE group_id = ? AND admin_id = ?", 
@@ -1215,16 +1218,16 @@ try:
             result = c.fetchone()
             
             if result:
-                logger.info(f"✅ Đã lưu thành công: {result}")
+                print(f"✅ DEBUG: Đã lưu thành công: {result}")
                 conn.close()
                 return True
             else:
-                logger.error("❌ Không tìm thấy dữ liệu sau khi insert")
+                print(f"❌ DEBUG: KHÔNG tìm thấy dữ liệu sau khi insert")
                 conn.close()
                 return False
                 
         except Exception as e:
-            logger.error(f"❌ Lỗi grant admin: {e}")
+            print(f"❌ DEBUG: Lỗi grant admin: {e}")
             return False
     
     def check_admin_permission(group_id, admin_id, permission='view'):
