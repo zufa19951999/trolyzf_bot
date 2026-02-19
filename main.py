@@ -6135,13 +6135,12 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
                 # Polling mode
                 logger.info("⏳ Bot running in polling mode...")
                 app.run_polling(timeout=30, drop_pending_updates=True)
-            
+                
+        except KeyboardInterrupt:
+            logger.info("👋 Bot stopped by user")
+            sys.exit(0)
         except Exception as e:
             logger.error(f"❌ LỖI: {e}", exc_info=True)
+            logger.info("🔄 Bot will exit. Render will restart automatically.")
             time.sleep(5)
-            # Thử restart lại bot
-            try:
-                os.execv(sys.executable, ['python'] + sys.argv)
-            except Exception as restart_error:
-                logger.error(f"❌ Không thể restart: {restart_error}")
-                time.sleep(60)
+            sys.exit(1)  # Render sẽ tự restart
