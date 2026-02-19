@@ -2510,41 +2510,41 @@ try:
         chat_type = update.effective_chat.type
         current_user = update.effective_user.id
         
-        # DEBUG: In ra log để kiểm tra
-        logger.info(f"🔍 BALANCE: current_user={current_user}, owner_id={owner_id}, chat_type={chat_type}")
-        
         # Nếu là private chat -> ai cũng xem được data của mình
         if chat_type == 'private':
-            pass  # Cho phép
+            pass
         else:
-            # TRONG GROUP: kiểm tra quyền
-            # Nếu là owner group -> cho phép
-            if is_group_owner(chat_id, current_user):
-                logger.info(f"✅ User {current_user} là owner group")
-                pass
-            # Nếu là admin đã được cấp quyền
-            elif check_admin_permission(chat_id, current_user, 'view'):
-                logger.info(f"✅ User {current_user} có quyền view")
-                pass
-            # Nếu đang xem data của chính mình (trường hợp đặc biệt)
-            elif current_user == owner_id:
-                logger.info(f"✅ User {current_user} đang xem data của chính mình")
-                pass
-            else:
-                logger.warning(f"❌ User {current_user} không có quyền xem data của owner {owner_id}")
+            # TRONG GROUP: kiểm tra quyền từ bảng group_admins
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            
+            # Kiểm tra xem có phải owner group không
+            c.execute("SELECT owner_id FROM group_owners WHERE group_id = ?", (chat_id,))
+            owner_result = c.fetchone()
+            is_owner = (owner_result and owner_result[0] == current_user)
+            
+            # Kiểm tra quyền admin từ bảng group_admins
+            c.execute('''SELECT can_view FROM group_admins 
+                         WHERE group_id = ? AND admin_id = ?''', (chat_id, current_user))
+            admin_result = c.fetchone()
+            can_view = admin_result[0] if admin_result else False
+            
+            conn.close()
+            
+            # CHO PHÉP NẾU: là owner HOẶC có quyền view
+            if not (is_owner or can_view):
                 await update.message.reply_text(
-                    "❌ Bạn không có quyền xem dữ liệu!\n\n"
-                    f"• Quyền của bạn: {check_admin_permission(chat_id, current_user, 'view')}\n"
-                    f"• Là owner group: {is_group_owner(chat_id, current_user)}\n"
+                    f"❌ Bạn không có quyền xem dữ liệu!\n\n"
                     f"• ID của bạn: `{current_user}`\n"
-                    f"• ID chủ sở hữu: `{owner_id}`\n\n"
+                    f"• Là owner group: {'✅' if is_owner else '❌'}\n"
+                    f"• Có quyền view: {'✅' if can_view else '❌'}\n\n"
                     f"Vui lòng liên hệ chủ sở hữu group để được cấp quyền.",
                     parse_mode=ParseMode.MARKDOWN
                 )
                 return
         
         # Xác định kỳ xem
-        period = 'month'  # mặc định
+        period = 'month'
         if ctx.args:
             arg = ctx.args[0].lower()
             if arg in ['day', 'ngay', 'hôm nay', 'today', 'd']:
@@ -2574,10 +2574,8 @@ try:
             await msg.edit_text("❌ Không thể tính cân đối!")
             return
         
-        # Format và gửi
         balance_msg = format_balance_message(balance_data, user_name)
         
-        # Thêm keyboard
         keyboard = [
             [InlineKeyboardButton("📅 Hôm nay", callback_data="balance_day"),
              InlineKeyboardButton("📅 Tháng này", callback_data="balance_month")],
