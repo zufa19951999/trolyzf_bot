@@ -2508,12 +2508,23 @@ try:
         owner_id = ctx.bot_data.get('effective_user_id', update.effective_user.id)
         chat_id = update.effective_chat.id
         chat_type = update.effective_chat.type
+        current_user = update.effective_user.id
         
         # Kiểm tra quyền nếu trong group
         if chat_type in ['group', 'supergroup']:
-            current_user = update.effective_user.id
-            if current_user != owner_id and not check_permission(chat_id, current_user, 'view'):
-                await update.message.reply_text("❌ Bạn không có quyền xem dữ liệu!")
+            # Nếu là owner group -> cho phép
+            if is_group_owner(chat_id, current_user):
+                pass  # Cho phép
+            # Nếu là admin đã được cấp quyền view
+            elif check_admin_permission(chat_id, current_user, 'view'):
+                pass  # Cho phép
+            # Còn lại là không có quyền
+            elif current_user != owner_id:
+                await update.message.reply_text(
+                    "❌ Bạn không có quyền xem dữ liệu!\n\n"
+                    "Vui lòng liên hệ chủ sở hữu group để được cấp quyền.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
                 return
         
         # Xác định kỳ xem
