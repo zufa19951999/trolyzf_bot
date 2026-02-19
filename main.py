@@ -1329,6 +1329,40 @@ try:
             logger.error(f"❌ Lỗi revoke admin: {e}")
             return False
 
+    @auto_update_user
+    async def reset_admins_table(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Reset bảng group_admins (CHỈ DÙNG KHI CẦN)"""
+        user_id = update.effective_user.id
+        
+        # Chỉ owner bot mới dùng được
+        if user_id != OWNER_ID:
+            await update.message.reply_text("❌ Chỉ owner bot mới dùng được!")
+            return
+        
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        
+        # Xóa bảng cũ
+        c.execute("DROP TABLE IF EXISTS group_admins")
+        
+        # Tạo bảng mới
+        c.execute('''CREATE TABLE group_admins
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      group_id INTEGER,
+                      admin_id INTEGER,
+                      granted_by INTEGER,
+                      can_view INTEGER DEFAULT 0,
+                      can_edit INTEGER DEFAULT 0,
+                      can_delete INTEGER DEFAULT 0,
+                      can_manage INTEGER DEFAULT 0,
+                      created_at TEXT,
+                      UNIQUE(group_id, admin_id))''')
+        
+        conn.commit()
+        conn.close()
+        
+        await update.message.reply_text("✅ Đã reset bảng group_admins thành công!")
+
     # ==================== GROUP OWNER MANAGEMENT ====================
     GROUP_OWNERS = {}
     
@@ -6257,6 +6291,7 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
             app.add_handler(CommandHandler("xoadanhmuc", delete_category_command))
             app.add_handler(CommandHandler("delcat", delete_category_command))
             app.add_handler(CommandHandler("debugdb", debug_db_command))
+            app.add_handler(CommandHandler("resetadmins", reset_admins_table))
             app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_chat_members))
             app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
             app.add_handler(CallbackQueryHandler(handle_callback))
