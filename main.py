@@ -1521,6 +1521,146 @@ try:
             if conn:
                 conn.close()
 
+    def edit_income(income_id, user_id, amount=None, source=None, note=None, currency=None):
+        """Sửa thông tin khoản thu
+        
+        Args:
+            income_id: ID khoản thu
+            user_id: ID người dùng
+            amount: Số tiền mới (None nếu không sửa)
+            source: Nguồn thu mới (None nếu không sửa)
+            note: Ghi chú mới (None nếu không sửa)
+            currency: Loại tiền mới (None nếu không sửa)
+        
+        Returns:
+            (success, message)
+        """
+        conn = None
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            
+            # Kiểm tra khoản thu có tồn tại không
+            c.execute('''SELECT id FROM incomes WHERE id = ? AND user_id = ?''', (income_id, user_id))
+            if not c.fetchone():
+                return False, "❌ Không tìm thấy khoản thu!"
+            
+            # Xây dựng câu lệnh UPDATE dựa trên các trường được cung cấp
+            updates = []
+            params = []
+            
+            if amount is not None:
+                updates.append("amount = ?")
+                params.append(amount)
+            
+            if source is not None:
+                updates.append("source = ?")
+                params.append(source)
+            
+            if note is not None:
+                updates.append("note = ?")
+                params.append(note)
+            
+            if currency is not None:
+                updates.append("currency = ?")
+                params.append(currency)
+            
+            if not updates:
+                return False, "❌ Không có thông tin nào để cập nhật!"
+            
+            # Thêm điều kiện WHERE
+            query = f"UPDATE incomes SET {', '.join(updates)} WHERE id = ? AND user_id = ?"
+            params.extend([income_id, user_id])
+            
+            c.execute(query, params)
+            conn.commit()
+            
+            if c.rowcount > 0:
+                logger.info(f"✅ Edited income {income_id} for user {user_id}")
+                return True, "✅ Đã cập nhật khoản thu thành công!"
+            else:
+                return False, "❌ Không thể cập nhật khoản thu!"
+                
+        except Exception as e:
+            logger.error(f"❌ Lỗi edit income: {e}")
+            return False, f"❌ Lỗi: {str(e)}"
+        finally:
+            if conn:
+                conn.close()
+
+    def edit_expense(expense_id, user_id, amount=None, category_id=None, note=None, currency=None):
+        """Sửa thông tin khoản chi
+        
+        Args:
+            expense_id: ID khoản chi
+            user_id: ID người dùng
+            amount: Số tiền mới (None nếu không sửa)
+            category_id: ID danh mục mới (None nếu không sửa)
+            note: Ghi chú mới (None nếu không sửa)
+            currency: Loại tiền mới (None nếu không sửa)
+        
+        Returns:
+            (success, message)
+        """
+        conn = None
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            
+            # Kiểm tra khoản chi có tồn tại không
+            c.execute('''SELECT id FROM expenses WHERE id = ? AND user_id = ?''', (expense_id, user_id))
+            if not c.fetchone():
+                return False, "❌ Không tìm thấy khoản chi!"
+            
+            # Nếu có category_id mới, kiểm tra category có tồn tại không
+            if category_id is not None:
+                c.execute('''SELECT id FROM expense_categories WHERE id = ? AND user_id = ?''', (category_id, user_id))
+                if not c.fetchone():
+                    return False, "❌ Không tìm thấy danh mục mới!"
+            
+            # Xây dựng câu lệnh UPDATE
+            updates = []
+            params = []
+            
+            if amount is not None:
+                updates.append("amount = ?")
+                params.append(amount)
+            
+            if category_id is not None:
+                updates.append("category_id = ?")
+                params.append(category_id)
+            
+            if note is not None:
+                updates.append("note = ?")
+                params.append(note)
+            
+            if currency is not None:
+                updates.append("currency = ?")
+                params.append(currency)
+            
+            if not updates:
+                return False, "❌ Không có thông tin nào để cập nhật!"
+            
+            # Thêm điều kiện WHERE
+            query = f"UPDATE expenses SET {', '.join(updates)} WHERE id = ? AND user_id = ?"
+            params.extend([expense_id, user_id])
+            
+            c.execute(query, params)
+            conn.commit()
+            
+            if c.rowcount > 0:
+                logger.info(f"✅ Edited expense {expense_id} for user {user_id}")
+                return True, "✅ Đã cập nhật khoản chi thành công!"
+            else:
+                return False, "❌ Không thể cập nhật khoản chi!"
+                
+        except Exception as e:
+            logger.error(f"❌ Lỗi edit expense: {e}")
+            return False, f"❌ Lỗi: {str(e)}"
+        finally:
+            if conn:
+                conn.close()
+
     # ==================== KEYBOARD ====================
     def get_main_keyboard():
         keyboard = [
@@ -1570,6 +1710,172 @@ try:
         return InlineKeyboardMarkup(keyboard)
 
     # ==================== COMMAND HANDLERS ====================
+    @auto_update_user
+    @require_permission('edit')
+    async def edit_income_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Sửa khoản thu: /editthu [id] [số tiền] [nguồn] [ghi chú]"""
+        owner_id = ctx.bot_data.get('effective_user_id', update.effective_user.id)
+        
+        if len(ctx.args) < 2:
+            # Hiển thị danh sách thu gần đây để chọn
+            recent = get_recent_incomes(owner_id, 10)
+            if not recent:
+                await update.message.reply_text("📭 Không có khoản thu nào để sửa!")
+                return
+            
+            msg = "✏️ *CHỌN KHOẢN THU CẦN SỬA*\n━━━━━━━━━━━━━━━━\n\n"
+            for inc in recent:
+                inc_id, amount, source, note, date, currency = inc
+                msg += f"• #{inc_id} {date}: {format_currency_simple(amount, currency)} - {source}\n"
+                if note:
+                    msg += f"  📝 {note}\n"
+            
+            msg += f"\n🕐 {format_vn_time_short()}\n\n"
+            msg += "👉 Dùng: `/editthu [id] [số tiền] [nguồn] [ghi chú]`\n"
+            msg += "VD: `/editthu 5 200000 Lương tháng 3`"
+            
+            await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+            return
+        
+        try:
+            income_id = int(ctx.args[0])
+            
+            # Parse các tham số
+            amount = None
+            source = None
+            note = None
+            currency = None
+            
+            if len(ctx.args) >= 2:
+                # Thử parse số tiền
+                try:
+                    amount = float(ctx.args[1].replace(',', ''))
+                except:
+                    pass
+            
+            if len(ctx.args) >= 3:
+                # Kiểm tra nếu là currency
+                if ctx.args[2].upper() in SUPPORTED_CURRENCIES:
+                    currency = ctx.args[2].upper()
+                    if len(ctx.args) >= 4:
+                        source = ctx.args[3]
+                        note = " ".join(ctx.args[4:]) if len(ctx.args) > 4 else ""
+                else:
+                    source = ctx.args[2]
+                    note = " ".join(ctx.args[3:]) if len(ctx.args) > 3 else ""
+            
+            success, message = edit_income(income_id, owner_id, amount, source, note, currency)
+            
+            if success:
+                # Lấy thông tin mới để hiển thị
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                c.execute('''SELECT amount, source, note, currency FROM incomes WHERE id = ?''', (income_id,))
+                updated = c.fetchone()
+                conn.close()
+                
+                if updated:
+                    new_amount, new_source, new_note, new_currency = updated
+                    msg = (f"✅ *ĐÃ SỬA KHOẢN THU #{income_id}*\n━━━━━━━━━━━━━━━━\n\n"
+                           f"💰 Số tiền: {format_currency_simple(new_amount, new_currency)}\n"
+                           f"📌 Nguồn: {new_source}\n"
+                           f"📝 Ghi chú: {new_note if new_note else 'Không có'}\n\n"
+                           f"🕐 {format_vn_time()}")
+                    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+            else:
+                await update.message.reply_text(message)
+                
+        except ValueError:
+            await update.message.reply_text("❌ ID không hợp lệ!")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Lỗi: {str(e)}")
+
+    @auto_update_user
+    @require_permission('edit')
+    async def edit_expense_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Sửa khoản chi: /editchi [id] [số tiền] [mã DM] [ghi chú]"""
+        owner_id = ctx.bot_data.get('effective_user_id', update.effective_user.id)
+        
+        if len(ctx.args) < 2:
+            # Hiển thị danh sách chi gần đây để chọn
+            recent = get_recent_expenses(owner_id, 10)
+            if not recent:
+                await update.message.reply_text("📭 Không có khoản chi nào để sửa!")
+                return
+            
+            msg = "✏️ *CHỌN KHOẢN CHI CẦN SỬA*\n━━━━━━━━━━━━━━━━\n\n"
+            for exp in recent:
+                exp_id, cat_name, amount, note, date, currency = exp
+                msg += f"• #{exp_id} {date}: {format_currency_simple(amount, currency)} - {cat_name}\n"
+                if note:
+                    msg += f"  📝 {note}\n"
+            
+            msg += f"\n🕐 {format_vn_time_short()}\n\n"
+            msg += "👉 Dùng: `/editchi [id] [số tiền] [mã DM] [ghi chú]`\n"
+            msg += "VD: `/editchi 3 75000 1 Ăn trưa`"
+            
+            await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+            return
+        
+        try:
+            expense_id = int(ctx.args[0])
+            
+            # Parse các tham số
+            amount = None
+            category_id = None
+            note = None
+            currency = None
+            
+            if len(ctx.args) >= 2:
+                try:
+                    amount = float(ctx.args[1].replace(',', ''))
+                except:
+                    pass
+            
+            if len(ctx.args) >= 3:
+                # Thử parse category_id
+                try:
+                    category_id = int(ctx.args[2])
+                    if len(ctx.args) >= 4:
+                        # Kiểm tra currency
+                        if ctx.args[3].upper() in SUPPORTED_CURRENCIES:
+                            currency = ctx.args[3].upper()
+                            note = " ".join(ctx.args[4:]) if len(ctx.args) > 4 else ""
+                        else:
+                            note = " ".join(ctx.args[3:]) if len(ctx.args) > 3 else ""
+                except:
+                    # Nếu không phải số, có thể là note
+                    note = " ".join(ctx.args[2:])
+            
+            success, message = edit_expense(expense_id, owner_id, amount, category_id, note, currency)
+            
+            if success:
+                # Lấy thông tin mới để hiển thị
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                c.execute('''SELECT e.amount, ec.name, e.note, e.currency 
+                           FROM expenses e 
+                           JOIN expense_categories ec ON e.category_id = ec.id 
+                           WHERE e.id = ?''', (expense_id,))
+                updated = c.fetchone()
+                conn.close()
+                
+                if updated:
+                    new_amount, new_cat, new_note, new_currency = updated
+                    msg = (f"✅ *ĐÃ SỬA KHOẢN CHI #{expense_id}*\n━━━━━━━━━━━━━━━━\n\n"
+                           f"💰 Số tiền: {format_currency_simple(new_amount, new_currency)}\n"
+                           f"📂 Danh mục: {new_cat}\n"
+                           f"📝 Ghi chú: {new_note if new_note else 'Không có'}\n\n"
+                           f"🕐 {format_vn_time()}")
+                    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+            else:
+                await update.message.reply_text(message)
+                
+        except ValueError:
+            await update.message.reply_text("❌ ID không hợp lệ!")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Lỗi: {str(e)}")
+            
     @auto_update_user
     async def whoami_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
@@ -3722,7 +4028,28 @@ try:
                     await update.message.reply_text(f"❌ Không tìm thấy khoản thu #{income_id}")
             except ValueError:
                 await update.message.reply_text("❌ ID không hợp lệ!")
-        
+
+        elif text.startswith('edit thu '):
+            # Chuyển thành lệnh /editthu
+            fake_args = text.replace('edit thu ', '').split()
+            ctx.args = fake_args
+            await edit_income_command(update, ctx)
+            
+        elif text.startswith('edit chi '):
+            # Chuyển thành lệnh /editchi
+            fake_args = text.replace('edit chi ', '').split()
+            ctx.args = fake_args
+            await edit_expense_command(update, ctx)
+            
+        elif text.startswith('sua thu '):
+            fake_args = text.replace('sua thu ', '').split()
+            ctx.args = fake_args
+            await edit_income_command(update, ctx)
+            
+        elif text.startswith('sua chi '):
+            fake_args = text.replace('sua chi ', '').split()
+            ctx.args = fake_args
+            await edit_expense_command(update, ctx)
 
     async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if update.effective_user:
@@ -5145,6 +5472,10 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
             app.add_handler(CommandHandler("xoadanhmuc", delete_category_command))
             app.add_handler(CommandHandler("xoadanhmuc", delete_category_command))
             app.add_handler(CommandHandler("delcat", delete_category_command))
+            app.add_handler(CommandHandler("editthu", edit_income_command))
+            app.add_handler(CommandHandler("editchi", edit_expense_command))
+            app.add_handler(CommandHandler("suathu", edit_income_command))
+            app.add_handler(CommandHandler("suachi", edit_expense_command))
             app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_chat_members))
             app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
             app.add_handler(CallbackQueryHandler(handle_callback))
