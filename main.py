@@ -2455,7 +2455,7 @@ try:
         # Kiểm tra quyền nếu trong group
         if chat_type in ['group', 'supergroup']:
             current_user = update.effective_user.id
-            if current_user != user_id and not check_permission(chat_id, current_user, 'view'):
+            if current_user != owner_id and not check_permission(chat_id, current_user, 'view'):
                 await update.message.reply_text("❌ Bạn không có quyền xem dữ liệu!")
                 return
         
@@ -2477,14 +2477,14 @@ try:
         # Lấy thông tin user
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
-        c.execute("SELECT username, first_name FROM users WHERE user_id = ?", (user_id,))
+        c.execute("SELECT username, first_name FROM users WHERE user_id = ?", (owner_id,))
         user_info = c.fetchone()
         conn.close()
         
         user_name = f"@{user_info[0]}" if user_info and user_info[0] else (user_info[1] if user_info else "")
         
         # Tính cân đối
-        balance_data = get_balance_summary(user_id, period)
+        balance_data = get_balance_summary(owner_id, period)
         
         if not balance_data:
             await msg.edit_text("❌ Không thể tính cân đối!")
@@ -6050,11 +6050,6 @@ except Exception as e:
     time.sleep(10)
     os.execv(sys.executable, ['python'] + sys.argv)
 
-cách 1
-Tôi thấy trong code của bạn có 2 vấn đề chính cần sửa:
-
-1️⃣ Lỗi trong hàm balance_command (dòng khoảng 4200)
-python
 @auto_update_user
 async def balance_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Xem cân đối thu chi"""
