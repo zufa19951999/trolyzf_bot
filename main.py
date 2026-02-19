@@ -5547,8 +5547,32 @@ try:
                     chat_id = query.message.chat.id
                     effective_user_id = ctx.bot_data.get('effective_user_id', current_user_id)
                     
-                    if current_user_id != effective_user_id and not check_permission(chat_id, current_user_id, 'view'):
-                        await query.edit_message_text("❌ Bạn không có quyền xem dữ liệu!")
+                    # KIỂM TRA QUYỀN TRỰC TIẾP TỪ DATABASE
+                    conn = sqlite3.connect(DB_PATH)
+                    c = conn.cursor()
+                    
+                    # Kiểm tra owner group
+                    c.execute("SELECT owner_id FROM group_owners WHERE group_id = ?", (chat_id,))
+                    owner_result = c.fetchone()
+                    is_owner = (owner_result and owner_result[0] == current_user_id)
+                    
+                    # Kiểm tra quyền admin từ bảng group_admins
+                    c.execute('''SELECT can_view FROM group_admins 
+                                 WHERE group_id = ? AND admin_id = ?''', (chat_id, current_user_id))
+                    admin_result = c.fetchone()
+                    can_view = admin_result[0] if admin_result else False
+                    
+                    conn.close()
+                    
+                    # Nếu không có quyền
+                    if not (is_owner or can_view or current_user_id == effective_user_id):
+                        await query.edit_message_text(
+                            "❌ Bạn không có quyền xem dữ liệu!\n\n"
+                            f"• ID của bạn: `{current_user_id}`\n"
+                            f"• Là owner: {'✅' if is_owner else '❌'}\n"
+                            f"• Có quyền view: {'✅' if can_view else '❌'}",
+                            parse_mode=ParseMode.MARKDOWN
+                        )
                         return
                     
                     incomes_data = get_income_by_period(effective_user_id, 'day')
@@ -5635,8 +5659,32 @@ try:
                     chat_id = query.message.chat.id
                     effective_user_id = ctx.bot_data.get('effective_user_id', current_user_id)
                     
-                    if current_user_id != effective_user_id and not check_permission(chat_id, current_user_id, 'view'):
-                        await query.edit_message_text("❌ Bạn không có quyền xem dữ liệu!")
+                    # KIỂM TRA QUYỀN TRỰC TIẾP TỪ DATABASE
+                    conn = sqlite3.connect(DB_PATH)
+                    c = conn.cursor()
+                    
+                    # Kiểm tra owner group
+                    c.execute("SELECT owner_id FROM group_owners WHERE group_id = ?", (chat_id,))
+                    owner_result = c.fetchone()
+                    is_owner = (owner_result and owner_result[0] == current_user_id)
+                    
+                    # Kiểm tra quyền admin từ bảng group_admins
+                    c.execute('''SELECT can_view FROM group_admins 
+                                 WHERE group_id = ? AND admin_id = ?''', (chat_id, current_user_id))
+                    admin_result = c.fetchone()
+                    can_view = admin_result[0] if admin_result else False
+                    
+                    conn.close()
+                    
+                    # Nếu không có quyền
+                    if not (is_owner or can_view or current_user_id == effective_user_id):
+                        await query.edit_message_text(
+                            "❌ Bạn không có quyền xem dữ liệu!\n\n"
+                            f"• ID của bạn: `{current_user_id}`\n"
+                            f"• Là owner: {'✅' if is_owner else '❌'}\n"
+                            f"• Có quyền view: {'✅' if can_view else '❌'}",
+                            parse_mode=ParseMode.MARKDOWN
+                        )
                         return
                     
                     incomes_data = get_income_by_period(effective_user_id, 'month')
@@ -5725,8 +5773,32 @@ try:
                     chat_id = query.message.chat.id
                     effective_user_id = ctx.bot_data.get('effective_user_id', current_user_id)
                     
-                    if current_user_id != effective_user_id and not check_permission(chat_id, current_user_id, 'view'):
-                        await query.edit_message_text("❌ Bạn không có quyền xem dữ liệu!")
+                    # KIỂM TRA QUYỀN TRỰC TIẾP TỪ DATABASE
+                    conn = sqlite3.connect(DB_PATH)
+                    c = conn.cursor()
+                    
+                    # Kiểm tra owner group
+                    c.execute("SELECT owner_id FROM group_owners WHERE group_id = ?", (chat_id,))
+                    owner_result = c.fetchone()
+                    is_owner = (owner_result and owner_result[0] == current_user_id)
+                    
+                    # Kiểm tra quyền admin từ bảng group_admins
+                    c.execute('''SELECT can_view FROM group_admins 
+                                 WHERE group_id = ? AND admin_id = ?''', (chat_id, current_user_id))
+                    admin_result = c.fetchone()
+                    can_view = admin_result[0] if admin_result else False
+                    
+                    conn.close()
+                    
+                    # Nếu không có quyền
+                    if not (is_owner or can_view or current_user_id == effective_user_id):
+                        await query.edit_message_text(
+                            "❌ Bạn không có quyền xem dữ liệu!\n\n"
+                            f"• ID của bạn: `{current_user_id}`\n"
+                            f"• Là owner: {'✅' if is_owner else '❌'}\n"
+                            f"• Có quyền view: {'✅' if can_view else '❌'}",
+                            parse_mode=ParseMode.MARKDOWN
+                        )
                         return
                     
                     # Lấy thông tin user
@@ -5811,8 +5883,32 @@ try:
                 chat_id = query.message.chat.id
                 effective_user_id = ctx.bot_data.get('effective_user_id', current_user_id)
                 
-                if current_user_id != effective_user_id and not check_permission(chat_id, current_user_id, 'view'):
-                    await query.edit_message_text("❌ Bạn không có quyền xem dữ liệu!")
+                # KIỂM TRA QUYỀN TRỰC TIẾP TỪ DATABASE
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                
+                # Kiểm tra owner group
+                c.execute("SELECT owner_id FROM group_owners WHERE group_id = ?", (chat_id,))
+                owner_result = c.fetchone()
+                is_owner = (owner_result and owner_result[0] == current_user_id)
+                
+                # Kiểm tra quyền admin từ bảng group_admins
+                c.execute('''SELECT can_view FROM group_admins 
+                             WHERE group_id = ? AND admin_id = ?''', (chat_id, current_user_id))
+                admin_result = c.fetchone()
+                can_view = admin_result[0] if admin_result else False
+                
+                conn.close()
+                
+                # Nếu không có quyền
+                if not (is_owner or can_view or current_user_id == effective_user_id):
+                    await query.edit_message_text(
+                        "❌ Bạn không có quyền xem dữ liệu!\n\n"
+                        f"• ID của bạn: `{current_user_id}`\n"
+                        f"• Là owner: {'✅' if is_owner else '❌'}\n"
+                        f"• Có quyền view: {'✅' if can_view else '❌'}",
+                        parse_mode=ParseMode.MARKDOWN
+                    )
                     return
                 
                 # Lấy thông tin user
