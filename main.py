@@ -4735,7 +4735,15 @@ try:
                 await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
 
             elif data.startswith("del_cat_"):
-                category_id = int(data.replace("del_cat_", ""))
+                # Lấy phần sau "del_cat_"
+                cat_id_str = data.replace("del_cat_", "")
+                try:
+                    category_id = int(cat_id_str)
+                except ValueError:
+                    logger.error(f"❌ Lỗi: cat_id không phải số: {cat_id_str}")
+                    await safe_edit_message(query, f"❌ Lỗi: ID danh mục không hợp lệ: {cat_id_str}")
+                    return
+                
                 owner_id = ctx.bot_data.get('effective_user_id', query.from_user.id)
                 
                 categories = get_expense_categories(owner_id)
@@ -4745,6 +4753,7 @@ try:
                         category_name = cat[1]
                         break
                 
+                # Escape tên danh mục
                 safe_category_name = escape_markdown(category_name)
                 
                 keyboard = [[InlineKeyboardButton("✅ Xác nhận xóa", callback_data=f"confirm_del_cat_{category_id}"),
@@ -4761,7 +4770,15 @@ try:
                 await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
             
             elif data.startswith("confirm_del_cat_"):
-                category_id = int(data.replace("confirm_del_cat_", ""))
+                # Lấy phần sau "confirm_del_cat_"
+                cat_id_str = data.replace("confirm_del_cat_", "")
+                try:
+                    category_id = int(cat_id_str)
+                except ValueError:
+                    logger.error(f"❌ Lỗi: cat_id không phải số: {cat_id_str}")
+                    await safe_edit_message(query, f"❌ Lỗi: ID danh mục không hợp lệ: {cat_id_str}")
+                    return
+                
                 owner_id = ctx.bot_data.get('effective_user_id', query.from_user.id)
                 
                 await query.edit_message_text("🔄 Đang xóa danh mục...")
