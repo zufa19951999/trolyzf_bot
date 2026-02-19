@@ -920,6 +920,53 @@ try:
             logger.error(f"❌ Lỗi grant_user_access: {e}")
             return False
 
+    def migrate_admin_data():
+        """Di chuyển dữ liệu admin từ bảng cũ sang bảng mới"""
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            
+            # Kiểm tra xem bảng group_admins có dữ liệu không
+            c.execute("SELECT COUNT(*) FROM group_admins")
+            old_admin_count = c.fetchone()[0]
+            
+            if old_admin_count > 0:
+                logger.info(f"🔄 Migrating {old_admin_count} old admin records...")
+                
+                # Lấy tất cả admin cũ
+                c.execute('''
+                    SELECT group_id, admin_id, granted_by, can_view, can_edit, can_delete, can_manage, created_at 
+                    FROM group_admins
+                ''')
+                old_admins = c.fetchall()
+                
+                migrated = 0
+                for admin in old_admins:
+                    group_id, admin_id, granted_by, can_view, can_edit, can_delete, can_manage, created_at = admin
+                    
+                    # Kiểm tra xem đã có trong bảng permissions chưa
+                    c.execute('''SELECT id FROM permissions WHERE group_id = ? AND user_id = ?''', (group_id, admin_id))
+                    if not c.fetchone():
+                        # Thêm vào bảng permissions
+                        c.execute('''
+                            INSERT INTO permissions 
+                            (group_id, user_id, granted_by, is_approved, role, 
+                             can_view_all, can_edit_all, can_delete_all, can_manage_perms, created_at, approved_at) 
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            group_id, admin_id, granted_by, 1, 'staff',
+                            can_view, can_edit, can_delete, can_manage,
+                            created_at, created_at
+                        ))
+                        migrated += 1
+                
+                conn.commit()
+                logger.info(f"✅ Migrated {migrated} admin records to permissions table")
+            
+            conn.close()
+        except Exception as e:
+            logger.error(f"❌ Lỗi migrate admin data: {e}")
+
     # ==================== USER FUNCTIONS WITH AUTO-UPDATE ====================
     async def update_user_info_async(user):
         try:
@@ -2901,13 +2948,23 @@ try:
             await update.message.reply_text("❌ Lỗi khi thêm admin!")
 
     def get_all_admins(group_id):
+        """Lấy danh sách admin từ bảng permissions (KHÔNG phải group_admins)"""
         conn = None
         try:
             conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
-            c.execute('''SELECT ga.admin_id, ga.can_view, ga.can_edit, ga.can_delete, ga.can_manage, u.username, u.first_name, ga.created_at FROM group_admins ga LEFT JOIN users u ON ga.admin_id = u.user_id WHERE ga.group_id = ? ORDER BY ga.created_at''', (group_id,))
+            # Đọc từ bảng permissions - đây là bảng đang được dùng để cấp quyền
+            c.execute('''
+                SELECT p.user_id, p.can_view_all, p.can_edit_all, p.can_delete_all, 
+                       p.can_manage_perms, u.username, u.first_name, p.created_at 
+                FROM permissions p 
+                LEFT JOIN users u ON p.user_id = u.user_id 
+                WHERE p.group_id = ? AND p.role = 'staff'
+                ORDER BY p.created_at
+            ''', (group_id,))
             admins = c.fetchall()
             conn.close()
+            logger.info(f"📋 Found {len(admins)} admins in group {group_id} from permissions table")
             return admins
         except Exception as e:
             logger.error(f"❌ Lỗi get_all_admins: {e}")
@@ -3315,8 +3372,21 @@ try:
         if ctx.args[0] == "list":
             admins = get_all_admins(chat_id)
             if not admins:
-                await update.message.reply_text("📭 Chưa có admin nào được cấp quyền!")
-                return
+                # Thử lấy từ bảng cũ nếu không có
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                c.execute('''SELECT COUNT(*) FROM group_admins WHERE group_id = ?''', (chat_id,))
+                old_count = c.fetchone()[0]
+                conn.close()
+                
+                if old_count > 0:
+                    await update.message.reply_text("⚠️ Phát hiện dữ liệu admin cũ! Đang migrate...")
+                    migrate_admin_data()
+                    admins = get_all_admins(chat_id)  # Thử lại
+                    
+                if not admins:
+                    await update.message.reply_text("📭 Chưa có admin nào được cấp quyền!")
+                    return
             
             msg = "👑 *DANH SÁCH ADMIN*\n━━━━━━━━━━━━━━━━\n\n"
             for admin in admins:
@@ -4885,8 +4955,119 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
             logger.error("❌ KHÔNG THỂ KHỞI TẠO DATABASE")
             time.sleep(5)
         
+        # ===== THÊM PHẦN KIỂM TRA TỔNG THỂ VÀO ĐÂY =====
+        logger.info("🔍 KIỂM TRA TỔNG THỂ HỆ THỐNG...")
+        
+        # 1. Migrate dữ liệu admin cũ
+        logger.info("🔄 Kiểm tra và migrate dữ liệu admin...")
+        try:
+            migrate_admin_data()
+        except Exception as e:
+            logger.error(f"❌ Lỗi migrate admin: {e}")
+        
+        # 2. Load group owners
+        logger.info("🔄 Loading group owners...")
         load_group_owners()
+        
+        # 3. Kiểm tra dữ liệu trong database
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            
+            # Đếm số lượng staff trong permissions
+            c.execute("SELECT COUNT(*) FROM permissions WHERE role = 'staff'")
+            staff_count = c.fetchone()[0]
+            
+            # Đếm số lượng admin cũ (nếu bảng còn tồn tại)
+            c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='group_admins'")
+            old_table_exists = c.fetchone()
+            
+            old_admin_count = 0
+            if old_table_exists:
+                c.execute("SELECT COUNT(*) FROM group_admins")
+                old_admin_count = c.fetchone()[0]
+            
+            # Đếm số lượng group owners
+            c.execute("SELECT COUNT(*) FROM group_owners")
+            group_owners_count = c.fetchone()[0]
+            
+            # Đếm tổng số user
+            c.execute("SELECT COUNT(*) FROM users")
+            users_count = c.fetchone()[0]
+            
+            # Đếm tổng số giao dịch
+            c.execute("SELECT COUNT(*) FROM portfolio")
+            portfolio_count = c.fetchone()[0]
+            
+            # Đếm tổng số thu chi
+            c.execute("SELECT COUNT(*) FROM incomes")
+            income_count = c.fetchone()[0]
+            
+            c.execute("SELECT COUNT(*) FROM expenses")
+            expense_count = c.fetchone()[0]
+            
+            conn.close()
+            
+            # In báo cáo kiểm tra
+            logger.info("📊 *BÁO CÁO KIỂM TRA DATABASE*")
+            logger.info(f"   • Users: {users_count}")
+            logger.info(f"   • Group Owners: {group_owners_count}")
+            logger.info(f"   • Staff (permissions): {staff_count}")
+            if old_table_exists:
+                logger.info(f"   • Old admins (group_admins): {old_admin_count}")
+            logger.info(f"   • Portfolio transactions: {portfolio_count}")
+            logger.info(f"   • Income records: {income_count}")
+            logger.info(f"   • Expense records: {expense_count}")
+            
+            # Cảnh báo nếu còn dữ liệu cũ
+            if old_admin_count > 0:
+                logger.warning(f"⚠️ Vẫn còn {old_admin_count} admin trong bảng cũ group_admins!")
+                logger.warning("   Chạy migrate_admin_data() để chuyển sang bảng mới")
+            
+            # Kiểm tra consistency
+            if staff_count == 0 and old_admin_count > 0:
+                logger.warning("⚠️ Có admin cũ nhưng chưa có staff trong permissions!")
+                logger.warning("   Đang thử migrate lại...")
+                migrate_admin_data()  # Thử migrate lần nữa
+                
+        except Exception as e:
+            logger.error(f"❌ Lỗi kiểm tra database: {e}")
+        
+        # 4. Kiểm tra cache
+        logger.info("🔄 Kiểm tra cache system...")
+        logger.info(f"   • Price cache: {price_cache.get_stats()}")
+        logger.info(f"   • USDT cache: {usdt_cache.get_stats()}")
+        logger.info(f"   • Username cache: {len(username_cache.cache)} entries")
+        
+        # 5. Kiểm tra thư mục
+        logger.info("🔄 Kiểm tra thư mục...")
+        db_size = os.path.getsize(DB_PATH) / (1024 * 1024) if os.path.exists(DB_PATH) else 0
+        logger.info(f"   • Database size: {db_size:.2f} MB")
+        logger.info(f"   • Backup dir: {BACKUP_DIR} ({len(os.listdir(BACKUP_DIR)) if os.path.exists(BACKUP_DIR) else 0} files)")
+        logger.info(f"   • Export dir: {EXPORT_DIR} ({len(os.listdir(EXPORT_DIR)) if os.path.exists(EXPORT_DIR) else 0} files)")
+        
+        # 6. Kiểm tra Render Disk
+        if render_config.is_render:
+            logger.info("🔄 Kiểm tra Render Disk...")
+            if os.path.exists('/data'):
+                # Kiểm tra dung lượng
+                stat = os.statvfs('/data')
+                free_space = stat.f_frsize * stat.f_bavail / (1024 * 1024 * 1024)  # GB
+                total_space = stat.f_frsize * stat.f_blocks / (1024 * 1024 * 1024)  # GB
+                logger.info(f"   • Render Disk mounted at /data")
+                logger.info(f"   • Free space: {free_space:.2f} GB / {total_space:.2f} GB")
+                
+                # Kiểm tra database có trong disk không
+                if DB_PATH.startswith('/data'):
+                    logger.info(f"   ✅ Database is on Render Disk: {DB_PATH}")
+                else:
+                    logger.warning(f"⚠️ Database is NOT on Render Disk: {DB_PATH}")
+            else:
+                logger.warning("⚠️ Render Disk not mounted at /data")
+        
+        # ===== KẾT THÚC PHẦN KIỂM TRA =====
 
+        # Các phần còn lại giữ nguyên
         try:
             migrate_database()
         except Exception as e:
