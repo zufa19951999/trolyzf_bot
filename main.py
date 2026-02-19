@@ -1484,11 +1484,16 @@ try:
                 conn.close()
 
     def delete_category(category_id, owner_id):
+        """Xóa danh mục và tất cả chi tiêu liên quan"""
         conn = None
         try:
             conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
             
+            # BẬT KHÓA NGOẠI
+            c.execute("PRAGMA foreign_keys = ON")
+            
+            # Kiểm tra danh mục có tồn tại không
             c.execute('''SELECT id, name FROM expense_categories WHERE id = ? AND user_id = ?''', (category_id, owner_id))
             category = c.fetchone()
             
@@ -1497,26 +1502,55 @@ try:
             
             category_name = category[1]
             
+            # Đếm số khoản chi trong danh mục
             c.execute('''SELECT COUNT(*) FROM expenses WHERE category_id = ? AND user_id = ?''', (category_id, owner_id))
             expenses_count = c.fetchone()[0]
             
+            # Bắt đầu transaction
             c.execute("BEGIN TRANSACTION")
             
+            # XÓA TẤT CẢ CHI TIÊU TRONG DANH MỤC TRƯỚC
             c.execute('''DELETE FROM expenses WHERE category_id = ? AND user_id = ?''', (category_id, owner_id))
             deleted_expenses = c.rowcount
             
+            # SAU ĐÓ MỚI XÓA DANH MỤC
             c.execute('''DELETE FROM expense_categories WHERE id = ? AND user_id = ?''', (category_id, owner_id))
             
+            # Kiểm tra xem đã xóa danh mục chưa
+            if c.rowcount == 0:
+                conn.rollback()
+                return False, "❌ Không thể xóa danh mục!", 0
+            
+            # Commit transaction
             conn.commit()
             
             logger.info(f"✅ Đã xóa danh mục {category_name} (ID: {category_id}) của user {owner_id}, kèm {deleted_expenses} khoản chi")
             
             return True, category_name, deleted_expenses
+            
+        except sqlite3.IntegrityError as e:
+            # Lỗi ràng buộc khóa ngoại
+            if conn:
+                conn.rollback()
+            logger.error(f"❌ Lỗi ràng buộc khóa ngoại khi xóa danh mục: {e}")
+            
+            # Thử cách khác: xóa từng bước
+            try:
+                # Xóa chi tiêu trước
+                c.execute('''DELETE FROM expenses WHERE category_id = ? AND user_id = ?''', (category_id, owner_id))
+                # Xóa danh mục sau
+                c.execute('''DELETE FROM expense_categories WHERE id = ? AND user_id = ?''', (category_id, owner_id))
+                conn.commit()
+                return True, category_name, c.rowcount
+            except:
+                return False, f"❌ Lỗi ràng buộc dữ liệu: {str(e)}", 0
+                
         except Exception as e:
             if conn:
                 conn.rollback()
             logger.error(f"❌ Lỗi xóa danh mục: {e}")
             return False, str(e), 0
+            
         finally:
             if conn:
                 conn.close()
@@ -4650,17 +4684,28 @@ try:
                 
                 await query.edit_message_text("🔄 Đang xóa danh mục...")
                 
-                success, result, deleted_count = delete_category(category_id, owner_id)
-                
-                if success:
-                    msg = (f"✅ *XÓA DANH MỤC THÀNH CÔNG*\n━━━━━━━━━━━━━━━━\n\n📋 Đã xóa danh mục: *{result}*\n💰 Đã xóa {deleted_count} khoản chi tiêu liên quan\n\n🕐 {format_vn_time()}")
-                else:
-                    msg = f"❌ *LỖI*\n━━━━━━━━━━━━━━━━\n\n{result}\n\n🕐 {format_vn_time()}"
-                
-                keyboard = [[InlineKeyboardButton("📋 Xem danh mục", callback_data="expense_categories"),
-                             InlineKeyboardButton("🔙 Về menu", callback_data="back_to_expense")]]
-                
-                await query.edit_message_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
+                try:
+                    success, result, deleted_count = delete_category(category_id, owner_id)
+                    
+                    if success:
+                        msg = (f"✅ *XÓA DANH MỤC THÀNH CÔNG*\n━━━━━━━━━━━━━━━━\n\n"
+                               f"📋 Đã xóa danh mục: *{result}*\n"
+                               f"💰 Đã xóa {deleted_count} khoản chi tiêu liên quan\n\n"
+                               f"🕐 {format_vn_time()}")
+                    else:
+                        msg = f"❌ *LỖI*\n━━━━━━━━━━━━━━━━\n\n{result}\n\n🕐 {format_vn_time()}"
+                    
+                    # Escape message trước khi gửi
+                    safe_msg = escape_markdown(msg)
+                    
+                    keyboard = [[InlineKeyboardButton("📋 Xem danh mục", callback_data="expense_categories"),
+                                 InlineKeyboardButton("🔙 Về menu", callback_data="back_to_expense")]]
+                    
+                    await query.edit_message_text(safe_msg, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
+                    
+                except Exception as e:
+                    logger.error(f"❌ Lỗi trong callback xóa danh mục: {e}")
+                    await query.edit_message_text(f"❌ Có lỗi xảy ra: {str(e)[:100]}")
             
             elif data == "edit_transactions":
                 uid = query.from_user.id
@@ -5293,7 +5338,32 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
         if not init_database():
             logger.error("❌ KHÔNG THỂ KHỞI TẠO DATABASE")
             time.sleep(5)
-        
+            
+        def fix_database_constraints():
+        """Sửa các ràng buộc trong database"""
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            
+            # Bật khóa ngoại
+            c.execute("PRAGMA foreign_keys = ON")
+            
+            # Kiểm tra và sửa bảng expenses
+            c.execute("PRAGMA table_info(expenses)")
+            columns = [col[1] for col in c.fetchall()]
+            
+            # Thêm FOREIGN KEY nếu chưa có
+            if 'category_id' in columns:
+                logger.info("✅ Bảng expenses có cột category_id")
+            else:
+                logger.warning("⚠️ Bảng expenses thiếu cột category_id")
+            
+            conn.close()
+            logger.info("✅ Đã kiểm tra ràng buộc database")
+            
+        except Exception as e:
+            logger.error(f"❌ Lỗi sửa database: {e}")
+            
         # ===== THÊM PHẦN KIỂM TRA TỔNG THỂ VÀO ĐÂY =====
         logger.info("🔍 KIỂM TRA TỔNG THỂ HỆ THỐNG...")
         
