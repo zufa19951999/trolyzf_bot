@@ -3614,63 +3614,6 @@ try:
         await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
     @auto_update_user
-    async def add_group_admin(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        """Thêm admin cho group (chỉ chủ sở hữu mới được dùng)"""
-        user_id = update.effective_user.id
-        chat_id = update.effective_chat.id
-        chat_type = update.effective_chat.type
-        
-        if chat_type not in ['group', 'supergroup']:
-            await update.message.reply_text("❌ Lệnh này chỉ dùng trong nhóm!")
-            return
-        
-        # Chỉ chủ sở hữu group mới được thêm admin
-        if not is_group_owner(chat_id, user_id):
-            await update.message.reply_text("❌ Chỉ chủ sở hữu group mới có thể thêm admin!")
-            return
-        
-        if not ctx.args:
-            await update.message.reply_text("❌ /addadmin @username [view/edit/delete/manage]")
-            return
-        
-        target = ctx.args[0]
-        perm_type = ctx.args[1] if len(ctx.args) > 1 else 'view'
-        
-        target_id = await resolve_user_id(target, ctx)
-        if not target_id:
-            await update.message.reply_text(f"❌ Không tìm thấy user {target}")
-            return
-        
-        # Xác định quyền
-        permissions = {'view': 0, 'edit': 0, 'delete': 0, 'manage': 0}
-        
-        if perm_type == 'view':
-            permissions['view'] = 1
-        elif perm_type == 'edit':
-            permissions['view'] = 1
-            permissions['edit'] = 1
-        elif perm_type == 'delete':
-            permissions['view'] = 1
-            permissions['delete'] = 1
-        elif perm_type == 'manage':
-            permissions['manage'] = 1
-        elif perm_type == 'full':
-            permissions['view'] = 1
-            permissions['edit'] = 1
-            permissions['delete'] = 1
-            permissions['manage'] = 1
-        else:
-            await update.message.reply_text("❌ Loại quyền không hợp lệ!")
-            return
-        
-        if grant_permission(chat_id, target_id, user_id, permissions):
-            await update.message.reply_text(
-                f"✅ Đã thêm @{target} làm admin với quyền {perm_type}!"
-            )
-        else:
-            await update.message.reply_text("❌ Lỗi khi thêm admin!")
-
-    @auto_update_user
     @require_group_permission('manage')
     async def add_admin_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Thêm admin cho group (chỉ owner group mới dùng được)"""
@@ -6277,7 +6220,6 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
             app.add_handler(CommandHandler("debugperm", debug_perm_command))
             app.add_handler(CommandHandler("setupgroup", setup_group_command))
             app.add_handler(CommandHandler("groupinfo", group_info_command))
-            app.add_handler(CommandHandler("addadmin", add_group_admin))
             app.add_handler(CommandHandler("hide", hide_keyboard))
             app.add_handler(CommandHandler("balance", balance_command))
             app.add_handler(CommandHandler("canhdoi", balance_command))
