@@ -3638,81 +3638,6 @@ try:
         
         await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
-    @auto_update_user
-    @require_group_permission('manage')
-    async def add_admin_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        """Thêm admin cho group (chỉ owner group mới dùng được)"""
-        user_id = update.effective_user.id
-        chat_id = update.effective_chat.id
-        chat_type = update.effective_chat.type
-        
-        if chat_type not in ['group', 'supergroup']:
-            await update.message.reply_text("❌ Lệnh này chỉ dùng trong nhóm!")
-            return
-        
-        # Chỉ owner group mới được thêm admin
-        if not is_group_owner(chat_id, user_id):
-            await update.message.reply_text("❌ Chỉ chủ sở hữu group mới có thể thêm admin!")
-            return
-        
-        if not ctx.args:
-            await update.message.reply_text(
-                "📝 *HƯỚNG DẪN THÊM ADMIN*\n\n"
-                "• `/addadmin @user view` - Thêm quyền xem\n"
-                "• `/addadmin @user edit` - Thêm quyền sửa\n"
-                "• `/addadmin @user delete` - Thêm quyền xóa\n"
-                "• `/addadmin @user manage` - Thêm quyền quản lý admin\n"
-                "• `/addadmin @user full` - Thêm toàn quyền\n\n"
-                "Ví dụ: `/addadmin @john view`",
-                parse_mode=ParseMode.MARKDOWN
-            )
-            return
-        
-        target = ctx.args[0]
-        perm_type = ctx.args[1] if len(ctx.args) > 1 else 'view'
-        
-        # Tìm user ID
-        if target.startswith('@'):
-            username = target[1:]
-            admin_id = get_user_id_by_username(username)
-            if not admin_id:
-                await update.message.reply_text(f"❌ Không tìm thấy user {target}")
-                return
-        else:
-            try:
-                admin_id = int(target)
-            except:
-                await update.message.reply_text("❌ ID không hợp lệ!")
-                return
-        
-        # Xác định quyền
-        permissions = {'view': 0, 'edit': 0, 'delete': 0, 'manage': 0}
-        
-        if perm_type == 'view':
-            permissions['view'] = 1
-        elif perm_type == 'edit':
-            permissions['view'] = 1
-            permissions['edit'] = 1
-        elif perm_type == 'delete':
-            permissions['view'] = 1
-            permissions['delete'] = 1
-        elif perm_type == 'manage':
-            permissions['manage'] = 1
-        elif perm_type == 'full':
-            permissions['view'] = 1
-            permissions['edit'] = 1
-            permissions['delete'] = 1
-            permissions['manage'] = 1
-        else:
-            await update.message.reply_text("❌ Loại quyền không hợp lệ!")
-            return
-        
-        if grant_admin_permission(chat_id, admin_id, user_id, permissions):
-            await update.message.reply_text(
-                f"✅ Đã thêm {target} làm admin với quyền {perm_type}!"
-            )
-        else:
-            await update.message.reply_text("❌ Lỗi khi thêm admin!")
 
     @auto_update_user
     @require_group_permission('view')
@@ -4868,15 +4793,36 @@ try:
                 target_user_id = int(data.replace("view_portfolio_", ""))
                 current_user_id = query.from_user.id
                 chat_id = query.message.chat.id
+                effective_user_id = ctx.bot_data.get('effective_user_id', current_user_id)
                 
-                # Kiểm tra quyền
-                if current_user_id != target_user_id:
-                    if not check_permission(chat_id, current_user_id, 'view'):
-                        await query.edit_message_text(
-                            "❌ Bạn không có quyền xem dữ liệu của người khác!",
-                            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]])
-                        )
-                        return
+                # KIỂM TRA QUYỀN TRỰC TIẾP TỪ DATABASE
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                
+                # Kiểm tra owner group
+                c.execute("SELECT owner_id FROM group_owners WHERE group_id = ?", (chat_id,))
+                owner_result = c.fetchone()
+                is_owner = (owner_result and owner_result[0] == current_user_id)
+                
+                # Kiểm tra quyền admin từ bảng group_admins
+                c.execute('''SELECT can_view FROM group_admins 
+                             WHERE group_id = ? AND admin_id = ?''', (chat_id, current_user_id))
+                admin_result = c.fetchone()
+                can_view = admin_result[0] if admin_result else False
+                
+                conn.close()
+                
+                # Nếu không có quyền
+                if not (is_owner or can_view or current_user_id == effective_user_id):
+                    await query.edit_message_text(
+                        "❌ Bạn không có quyền xem dữ liệu của người khác!\n\n"
+                        f"• ID của bạn: `{current_user_id}`\n"
+                        f"• Là owner: {'✅' if is_owner else '❌'}\n"
+                        f"• Có quyền view: {'✅' if can_view else '❌'}",
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                    return
+
                 
                 # Lấy thông tin user target
                 conn = sqlite3.connect(DB_PATH)
