@@ -6049,22 +6049,3 @@ except Exception as e:
     logger.critical(f"💥 LỖI NGHIÊM TRỌNG: {e}", exc_info=True)
     time.sleep(10)
     os.execv(sys.executable, ['python'] + sys.argv)
-
-@auto_update_user
-async def balance_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Xem cân đối thu chi"""
-    owner_id = ctx.bot_data.get('effective_user_id', update.effective_user.id)
-    chat_id = update.effective_chat.id
-    chat_type = update.effective_chat.type
-    
-    # KIỂM TRA QUYỀN - SỬA DÒNG NÀY
-    if chat_type in ['group', 'supergroup']:
-        current_user = update.effective_user.id
-        # SỬA: user_id -> owner_id
-        if current_user != owner_id and not check_permission(chat_id, current_user, 'view'):
-            await update.message.reply_text("❌ Bạn không có quyền xem dữ liệu!")
-            return
-    
-    # Xác định kỳ xem
-    period = 'month'  # mặc định
-    if ctx.args:
