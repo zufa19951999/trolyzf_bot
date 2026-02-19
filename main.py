@@ -4672,10 +4672,6 @@ try:
                 current_user_id = query.from_user.id
                 chat_id = query.message.chat.id
                 
-                # KIỂM TRA XEM CÓ ĐANG XEM CỦA AI KHÔNG
-                # Lưu ý: Cần có cơ chế để chọn user cần xem
-                # Tạm thời, chúng ta sẽ thêm nút chọn user trong group
-                
                 # Lấy danh sách user đã tương tác trong group
                 conn = sqlite3.connect(DB_PATH)
                 c = conn.cursor()
@@ -4701,7 +4697,6 @@ try:
                 
                 for i, (uid, username, first_name) in enumerate(users_with_portfolio, 1):
                     display = f"@{username}" if username else first_name or f"User {uid}"
-                    display_short = display[:15] + "..." if len(display) > 15 else display
                     msg += f"{i}. {display}\n"
                     
                     row.append(InlineKeyboardButton(f"{i}", callback_data=f"view_portfolio_{uid}"))
