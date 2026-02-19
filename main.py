@@ -6123,7 +6123,7 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
             
             # Khởi động thông minh
             smart_startup()
-        
+            
             # Chạy bot
             if render_config.is_render and render_config.render_url:
                 # Webhook mode: Flask đã chạy, cần giữ main thread alive
@@ -6135,9 +6135,8 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
                 # Polling mode
                 logger.info("⏳ Bot running in polling mode...")
                 app.run_polling(timeout=30, drop_pending_updates=True)
-                
-        except KeyboardInterrupt:
-            logger.info("👋 Bot stopped by user")
+            
         except Exception as e:
             logger.error(f"❌ LỖI: {e}", exc_info=True)
             time.sleep(5)
+            os.execv(sys.executable, ['python'] + sys.argv)
