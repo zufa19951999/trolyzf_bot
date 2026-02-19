@@ -6123,7 +6123,7 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
             
             # Khởi động thông minh
             smart_startup()
-            
+        
             # Chạy bot
             if render_config.is_render and render_config.render_url:
                 # Webhook mode: Flask đã chạy, cần giữ main thread alive
@@ -6138,9 +6138,6 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
                 
         except KeyboardInterrupt:
             logger.info("👋 Bot stopped by user")
-            sys.exit(0)
         except Exception as e:
             logger.error(f"❌ LỖI: {e}", exc_info=True)
-            logger.info("🔄 Bot will exit. Render will restart automatically.")
             time.sleep(5)
-            sys.exit(1)  # Render sẽ tự restart
