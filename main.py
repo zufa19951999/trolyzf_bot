@@ -6155,4 +6155,9 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
         except Exception as e:
             logger.error(f"❌ LỖI: {e}", exc_info=True)
             time.sleep(5)
-            os.execv(sys.executable, ['python'] + sys.argv)
+            # Thử restart lại bot
+            try:
+                os.execv(sys.executable, ['python'] + sys.argv)
+            except Exception as restart_error:
+                logger.error(f"❌ Không thể restart: {restart_error}")
+                time.sleep(60)
