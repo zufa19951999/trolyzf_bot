@@ -244,6 +244,57 @@ def rate_limit(max_calls=30):
         return wrapper
     return decorator
 
+# ==================== PERMISSION DECORATORS ====================
+def require_permission(permission_type):
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
+            user_id = update.effective_user.id
+            chat_id = update.effective_chat.id
+            chat_type = update.effective_chat.type
+            
+            # Cho phép owner luôn có quyền
+            if is_owner(user_id):
+                return await func(update, context, *args, **kwargs)
+            
+            # Trong group, kiểm tra quyền
+            if chat_type in ['group', 'supergroup']:
+                if not check_permission(chat_id, user_id, permission_type):
+                    await update.message.reply_text(f"❌ Bạn không có quyền {permission_type} trong group này!")
+                    return
+            # Trong private chat, user có toàn quyền với data của mình
+            else:
+                # User có thể làm mọi thứ với data của mình
+                pass
+            
+            return await func(update, context, *args, **kwargs)
+        return wrapper
+    return decorator
+
+def require_group_permission(permission_type):
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
+            user_id = update.effective_user.id
+            chat_id = update.effective_chat.id
+            chat_type = update.effective_chat.type
+            
+            # Cho phép owner luôn có quyền
+            if is_owner(user_id):
+                return await func(update, context, *args, **kwargs)
+            
+            # Chỉ kiểm tra trong group
+            if chat_type in ['group', 'supergroup']:
+                if not check_permission(chat_id, user_id, permission_type):
+                    await update.message.reply_text(f"❌ Bạn không có quyền {permission_type} trong group này!")
+                    return
+                return await func(update, context, *args, **kwargs)
+            else:
+                await update.message.reply_text("❌ Lệnh này chỉ dùng trong group!")
+                return
+        return wrapper
+    return decorator
+    
 # ==================== KHỞI TẠO ====================
 try:
     load_dotenv()
