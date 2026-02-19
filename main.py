@@ -1806,9 +1806,12 @@ try:
             msg = "✏️ *CHỌN KHOẢN CHI CẦN SỬA*\n━━━━━━━━━━━━━━━━\n\n"
             for exp in recent:
                 exp_id, cat_name, amount, note, date, currency = exp
-                msg += f"• #{exp_id} {date}: {format_currency_simple(amount, currency)} - {cat_name}\n"
-                if note:
-                    msg += f"  📝 {note}\n"
+                # Escape các ký tự đặc biệt
+                safe_cat = escape_markdown(cat_name)
+                safe_note = escape_markdown(note) if note else ""
+                msg += f"• #{exp_id} {date}: {format_currency_simple(amount, currency)} - {safe_cat}\n"
+                if safe_note:
+                    msg += f"  📝 {safe_note}\n"
             
             msg += f"\n🕐 {format_vn_time_short()}\n\n"
             msg += "👉 Dùng: `/editchi [id] [số tiền] [mã DM] [ghi chú]`\n"
@@ -1862,14 +1865,23 @@ try:
                 
                 if updated:
                     new_amount, new_cat, new_note, new_currency = updated
+                    # Escape các ký tự đặc biệt
+                    safe_cat = escape_markdown(new_cat)
+                    safe_note = escape_markdown(new_note) if new_note else ""
+                    
                     msg = (f"✅ *ĐÃ SỬA KHOẢN CHI #{expense_id}*\n━━━━━━━━━━━━━━━━\n\n"
                            f"💰 Số tiền: {format_currency_simple(new_amount, new_currency)}\n"
-                           f"📂 Danh mục: {new_cat}\n"
-                           f"📝 Ghi chú: {new_note if new_note else 'Không có'}\n\n"
+                           f"📂 Danh mục: {safe_cat}\n"
+                           f"📝 Ghi chú: {safe_note if safe_note else 'Không có'}\n\n"
                            f"🕐 {format_vn_time()}")
-                    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+                    
+                    # Escape toàn bộ msg trước khi gửi
+                    safe_msg = escape_markdown(msg)
+                    await update.message.reply_text(safe_msg, parse_mode=ParseMode.MARKDOWN)
             else:
-                await update.message.reply_text(message)
+                # Message từ edit_expense đã có thể có ký tự đặc biệt
+                safe_message = escape_markdown(message)
+                await update.message.reply_text(safe_message)
                 
         except ValueError:
             await update.message.reply_text("❌ ID không hợp lệ!")
