@@ -4161,7 +4161,8 @@ try:
 
     # ==================== EXPENSE SHORTCUT HANDLERS ====================
     async def expense_shortcut_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        user_id = ctx.bot_data.get('effective_user_id', update.effective_user.id)
+        """Xử lý các lệnh tắt cho chi tiêu"""
+        owner_id = ctx.bot_data.get('effective_user_id', update.effective_user.id)
         text = update.message.text.strip()
         
         if text.startswith('tn '):
@@ -4219,7 +4220,7 @@ try:
                     await update.message.reply_text("❌ Ngân sách không hợp lệ!")
                     return
             
-            if add_expense_category(user_id, name, budget):
+            if add_expense_category(owner_id, name, budget):
                 await update.message.reply_text(
                     f"✅ *ĐÃ THÊM DANH MỤC*\n━━━━━━━━━━━━━━━━\n\n"
                     f"📋 Tên: *{name.upper()}*\n"
@@ -4281,8 +4282,8 @@ try:
                 await update.message.reply_text("❌ ID hoặc số tiền không hợp lệ!")
         
         elif text == 'ds':
-            recent_incomes = get_recent_incomes(user_id, 5)
-            recent_expenses = get_recent_expenses(user_id, 5)
+            recent_incomes = get_recent_incomes(owner_id, 5)
+            recent_expenses = get_recent_expenses(owner_id, 5)
             
             if not recent_incomes and not recent_expenses:
                 await update.message.reply_text("📭 Chưa có giao dịch nào!")
@@ -4307,8 +4308,8 @@ try:
             await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
         
         elif text == 'bc':
-            incomes_data = get_income_by_period(user_id, 'month')
-            expenses_data = get_expenses_by_period(user_id, 'month')
+            incomes_data = get_income_by_period(owner_id, 'month')
+            expenses_data = get_expenses_by_period(owner_id, 'month')
             
             msg = f"📊 *BÁO CÁO THÁNG {get_vn_time().strftime('%m/%Y')}*\n━━━━━━━━━━━━━━━━\n\n"
             
@@ -4383,7 +4384,7 @@ try:
             
             try:
                 expense_id = int(parts[2])
-                if delete_expense(expense_id, user_id):
+                if delete_expense(expense_id, owner_id):
                     await update.message.reply_text(f"✅ Đã xóa khoản chi #{expense_id}\n\n🕐 {format_vn_time_short()}")
                 else:
                     await update.message.reply_text(f"❌ Không tìm thấy khoản chi #{expense_id}")
@@ -4398,7 +4399,7 @@ try:
             
             try:
                 income_id = int(parts[2])
-                if delete_income(income_id, user_id):
+                if delete_income(income_id, owner_id):
                     await update.message.reply_text(f"✅ Đã xóa khoản thu #{income_id}\n\n🕐 {format_vn_time_short()}")
                 else:
                     await update.message.reply_text(f"❌ Không tìm thấy khoản thu #{income_id}")
