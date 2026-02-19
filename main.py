@@ -1264,7 +1264,7 @@ try:
             conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
             
-            # Tạo bảng nếu chưa có (để đảm bảo)
+            # ĐẢM BẢO BẢNG TỒN TẠI
             c.execute('''CREATE TABLE IF NOT EXISTS group_admins
                          (id INTEGER PRIMARY KEY AUTOINCREMENT,
                           group_id INTEGER,
@@ -1277,18 +1277,32 @@ try:
                           created_at TEXT,
                           UNIQUE(group_id, admin_id))''')
             
-            # Lấy danh sách admin
-            c.execute('''SELECT ga.admin_id, ga.can_view, ga.can_edit, ga.can_delete, ga.can_manage,
-                                u.username, u.first_name, ga.created_at
-                         FROM group_admins ga
-                         LEFT JOIN users u ON ga.admin_id = u.user_id
-                         WHERE ga.group_id = ?
-                         ORDER BY ga.created_at''', (group_id,))
-            admins = c.fetchall()
-            conn.close()
+            # LẤY TẤT CẢ DỮ LIỆU KHÔNG CẦN JOIN (để test)
+            c.execute('''SELECT admin_id, can_view, can_edit, can_delete, can_manage, created_at
+                         FROM group_admins 
+                         WHERE group_id = ?
+                         ORDER BY created_at''', (group_id,))
             
-            logger.info(f"📋 Tìm thấy {len(admins)} admin trong group {group_id}")
+            rows = c.fetchall()
+            logger.info(f"📋 Raw data from group_admins for {group_id}: {rows}")
+            
+            # Nếu có dữ liệu, format lại
+            admins = []
+            for row in rows:
+                admin_id, view, edit, delete, manage, created = row
+                
+                # Lấy thông tin username riêng
+                c.execute("SELECT username, first_name FROM users WHERE user_id = ?", (admin_id,))
+                user_info = c.fetchone()
+                username = user_info[0] if user_info else None
+                first_name = user_info[1] if user_info else None
+                
+                admins.append((admin_id, view, edit, delete, manage, username, first_name, created))
+            
+            conn.close()
+            logger.info(f"📋 Đã format {len(admins)} admin cho group {group_id}")
             return admins
+            
         except Exception as e:
             logger.error(f"❌ Lỗi get_all_admins: {e}")
             return []
@@ -3740,16 +3754,40 @@ try:
             await update.message.reply_text("❌ Lệnh này chỉ dùng trong nhóm!")
             return
         
+        # Gửi thông báo đang xử lý
+        msg = await update.message.reply_text("🔄 Đang kiểm tra danh sách admin...")
+        
         # Lấy danh sách admin từ database
         admins = get_all_admins(chat_id)
         
         if not admins:
-            await update.message.reply_text("📭 Chưa có admin nào trong group!")
+            await msg.edit_text(
+                f"📭 Chưa có admin nào trong group!\n\n"
+                f"Dùng `/addadmin @user [quyền]` để thêm admin.\n\n"
+                f"Ví dụ: `/addadmin @bixin6688 full`",
+                parse_mode=ParseMode.MARKDOWN
+            )
             return
         
-        msg = "👑 *DANH SÁCH ADMIN*\n━━━━━━━━━━━━━━━━\n\n"
+        # Lấy thông tin owner group
+        owner_id = get_group_owner(chat_id)
+        
+        msg_text = "👑 *DANH SÁCH ADMIN*\n━━━━━━━━━━━━━━━━\n\n"
+        
         for admin in admins:
-            admin_id, view, edit, delete, manage, username, first_name, created_at = admin
+            # Kiểm tra cấu trúc dữ liệu
+            if len(admin) >= 7:
+                admin_id, view, edit, delete, manage, username, first_name, created_at = admin
+            else:
+                # Nếu là cấu trúc khác
+                admin_id = admin[0]
+                view = admin[1] if len(admin) > 1 else 0
+                edit = admin[2] if len(admin) > 2 else 0
+                delete = admin[3] if len(admin) > 3 else 0
+                manage = admin[4] if len(admin) > 4 else 0
+                username = admin[5] if len(admin) > 5 else None
+                first_name = admin[6] if len(admin) > 6 else None
+                created_at = admin[7] if len(admin) > 7 else "N/A"
             
             # Tạo tên hiển thị
             if username:
@@ -3759,6 +3797,9 @@ try:
             else:
                 display = f"User {admin_id}"
             
+            # Đánh dấu owner
+            owner_tag = " 👑 (OWNER)" if admin_id == owner_id else ""
+            
             # Liệt kê quyền
             permissions = []
             if view: permissions.append("👁 Xem")
@@ -3766,12 +3807,17 @@ try:
             if delete: permissions.append("🗑 Xóa")
             if manage: permissions.append("🔐 Quản lý admin")
             
-            msg += f"• {display} (`{admin_id}`)\n"
-            msg += f"  Quyền: {', '.join(permissions)}\n"
-            msg += f"  Ngày thêm: {created_at[:10]}\n\n"
+            if not permissions:
+                permissions = ["❌ Không có quyền"]
+            
+            msg_text += f"• {display}{owner_tag} (`{admin_id}`)\n"
+            msg_text += f"  Quyền: {', '.join(permissions)}\n"
+            msg_text += f"  Ngày thêm: {created_at[:10] if created_at != 'N/A' else created_at}\n\n"
         
-        msg += f"🕐 {format_vn_time()}"
-        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+        msg_text += f"\n🕐 {format_vn_time()}"
+        
+        # Gửi tin nhắn
+        await msg.edit_text(msg_text, parse_mode=ParseMode.MARKDOWN)
 
     @auto_update_user
     @require_group_permission('manage')
