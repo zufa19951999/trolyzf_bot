@@ -3552,8 +3552,6 @@ try:
             except ValueError:
                 await update.message.reply_text("❌ ID không hợp lệ!")
         
-        }
-        
 
     async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if update.effective_user:
@@ -4881,5 +4879,5 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
         except KeyboardInterrupt:
             logger.info("👋 Bot stopped by user")
         except Exception as e:
-            logger.error(f"❌ LỖI: {e}", exc_info=True)
-            time.sleep(5)
+            logger.error(f"Lỗi: {e}")
+            await update.message.reply_text("❌ Có lỗi xảy ra!")
