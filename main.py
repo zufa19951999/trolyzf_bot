@@ -3935,15 +3935,23 @@ try:
 
     @auto_update_user
     async def debug_db_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        """Debug database - chỉ dành cho owner"""
+        """Debug database - dành cho owner bot và owner group"""
         user_id = update.effective_user.id
+        chat_id = update.effective_chat.id
+        chat_type = update.effective_chat.type
         
-        # Chỉ owner bot mới dùng được
-        if user_id != OWNER_ID:
-            await update.message.reply_text("❌ Chỉ owner mới dùng được!")
+        # Cho phép cả owner bot và owner group đều dùng được
+        is_bot_owner = (user_id == OWNER_ID)
+        is_group_owner = False
+        
+        if chat_type in ['group', 'supergroup']:
+            is_group_owner = (user_id == get_group_owner(chat_id))
+        
+        if not (is_bot_owner or is_group_owner):
+            await update.message.reply_text("❌ Chỉ owner bot hoặc owner group mới dùng được!")
             return
         
-        chat_id = update.effective_chat.id
+        await update.message.reply_text("🔄 Đang kiểm tra database...")
         
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
@@ -3953,7 +3961,10 @@ try:
         tables = c.fetchall()
         
         msg = "📊 *DATABASE INFO*\n━━━━━━━━━━━━━━━━\n\n"
-        msg += f"📍 Database: `{DB_PATH}`\n\n"
+        msg += f"📍 Database: `{DB_PATH}`\n"
+        msg += f"👤 User ID: `{user_id}`\n"
+        msg += f"💬 Chat ID: `{chat_id}`\n"
+        msg += f"📌 Chat Type: `{chat_type}`\n\n"
         
         msg += "*📋 CÁC BẢNG:*\n"
         for table in tables:
@@ -3971,27 +3982,49 @@ try:
             
             if count > 0:
                 c.execute('''SELECT ga.admin_id, ga.can_view, ga.can_edit, ga.can_delete, ga.can_manage,
-                                    u.username, ga.created_at
+                                    u.username, u.first_name, ga.created_at
                              FROM group_admins ga
                              LEFT JOIN users u ON ga.admin_id = u.user_id
                              WHERE ga.group_id = ?''', (chat_id,))
                 admins = c.fetchall()
                 for admin in admins:
-                    admin_id, view, edit, delete, manage, username, created = admin
-                    msg += f"\n  • ID: `{admin_id}`\n"
-                    msg += f"    Username: @{username if username else 'None'}\n"
-                    msg += f"    Quyền: {'👁 ' if view else ''}{'✏️ ' if edit else ''}{'🗑 ' if delete else ''}{'🔐 ' if manage else ''}\n"
+                    admin_id, view, edit, delete, manage, username, first_name, created = admin
+                    display = f"@{username}" if username else first_name or f"User {admin_id}"
+                    msg += f"\n  • {display} (`{admin_id}`)\n"
+                    msg += f"    Quyền: {'👁 ' if view else '❌'}{'✏️ ' if edit else '❌'}{'🗑 ' if delete else '❌'}{'🔐 ' if manage else '❌'}\n"
                     msg += f"    Ngày thêm: {created[:10]}\n"
         else:
             msg += "❌ Bảng `group_admins` CHƯA TỒN TẠI!\n"
+            msg += "🔄 Đang tạo bảng...\n"
+            
+            # Tạo bảng ngay lập tức
+            c.execute('''CREATE TABLE IF NOT EXISTS group_admins
+                         (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                          group_id INTEGER,
+                          admin_id INTEGER,
+                          granted_by INTEGER,
+                          can_view INTEGER DEFAULT 0,
+                          can_edit INTEGER DEFAULT 0,
+                          can_delete INTEGER DEFAULT 0,
+                          can_manage INTEGER DEFAULT 0,
+                          created_at TEXT,
+                          UNIQUE(group_id, admin_id))''')
+            conn.commit()
+            msg += "✅ Đã tạo bảng `group_admins` thành công!\n"
         
         # Kiểm tra thông tin owner group
         owner_id = get_group_owner(chat_id)
         msg += f"\n*👑 OWNER GROUP:* "
         if owner_id:
-            msg += f"`{owner_id}`\n"
+            # Lấy thông tin owner
+            c.execute("SELECT username, first_name FROM users WHERE user_id = ?", (owner_id,))
+            owner_info = c.fetchone()
+            owner_display = f"@{owner_info[0]}" if owner_info and owner_info[0] else (owner_info[1] if owner_info else f"User {owner_id}")
+            msg += f"{owner_display} (`{owner_id}`)\n"
         else:
             msg += "Chưa có owner\n"
+            if is_bot_owner:
+                msg += "💡 Dùng `/setupgroup` để thiết lập owner cho group này.\n"
         
         conn.close()
         
