@@ -2446,69 +2446,6 @@ try:
         return None
 
     @auto_update_user
-    async def balance_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        """Xem cân đối thu chi"""
-        owner_id = ctx.bot_data.get('effective_user_id', update.effective_user.id)
-        chat_id = update.effective_chat.id
-        chat_type = update.effective_chat.type
-        
-        # Kiểm tra quyền nếu trong group
-        if chat_type in ['group', 'supergroup']:
-            current_user = update.effective_user.id
-            if current_user != user_id and not check_permission(chat_id, current_user, 'view'):
-                await update.message.reply_text("❌ Bạn không có quyền xem dữ liệu!")
-                return
-        
-        # Xác định kỳ xem
-        period = 'month'  # mặc định
-        if ctx.args:
-            arg = ctx.args[0].lower()
-            if arg in ['day', 'ngay', 'hôm nay', 'today', 'd']:
-                period = 'day'
-            elif arg in ['month', 'thang', 'tháng', 'this month', 'm']:
-                period = 'month'
-            elif arg in ['year', 'nam', 'năm', 'this year', 'y']:
-                period = 'year'
-            elif arg in ['all', 'tat ca', 'tất cả', 'all time', 'a']:
-                period = 'all'
-        
-        msg = await update.message.reply_text("🔄 Đang tính toán cân đối...")
-        
-        # Lấy thông tin user
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute("SELECT username, first_name FROM users WHERE user_id = ?", (user_id,))
-        user_info = c.fetchone()
-        conn.close()
-        
-        user_name = f"@{user_info[0]}" if user_info and user_info[0] else (user_info[1] if user_info else "")
-        
-        # Tính cân đối
-        balance_data = get_balance_summary(user_id, period)
-        
-        if not balance_data:
-            await msg.edit_text("❌ Không thể tính cân đối!")
-            return
-        
-        # Format và gửi
-        balance_msg = format_balance_message(balance_data, user_name)
-        
-        # Thêm keyboard
-        keyboard = [
-            [InlineKeyboardButton("📅 Hôm nay", callback_data="balance_day"),
-             InlineKeyboardButton("📅 Tháng này", callback_data="balance_month")],
-            [InlineKeyboardButton("📅 Năm nay", callback_data="balance_year"),
-             InlineKeyboardButton("📊 Tất cả", callback_data="balance_all")],
-            [InlineKeyboardButton("🔙 Về menu", callback_data="back_to_expense")]
-        ]
-        
-        await msg.edit_text(
-            balance_msg,
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-
-    @auto_update_user
     async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if update.effective_chat.type in ['group', 'supergroup']:
             welcome_msg = (
@@ -3980,8 +3917,55 @@ try:
             )
             return
         
-        # Hiển thị portfolio (giữ nguyên logic hiển thị cũ)
-        # ... code hiển thị portfolio ...
+        # Lấy giá batch
+        symbols = list(set([row[0] for row in portfolio_data]))
+        prices = get_prices_batch(symbols)
+        
+        # Tính toán portfolio
+        summary = {}
+        total_invest = 0
+        total_value = 0
+        
+        for row in portfolio_data:
+            symbol, amount, price, date, cost = row
+            if symbol not in summary:
+                summary[symbol] = {'amount': 0, 'cost': 0}
+            summary[symbol]['amount'] += amount
+            summary[symbol]['cost'] += cost
+            total_invest += cost
+        
+        msg = f"📊 *DANH MỤC {target_name}*\n━━━━━━━━━━━━━━━━\n\n"
+        
+        for symbol, data in summary.items():
+            price_data = prices.get(symbol)
+            if price_data:
+                current = data['amount'] * price_data['p']
+                profit = current - data['cost']
+                profit_percent = (profit / data['cost']) * 100 if data['cost'] > 0 else 0
+                total_value += current
+                
+                msg += f"*{symbol}*\n"
+                msg += f"📊 SL: `{data['amount']:.4f}`\n"
+                msg += f"💰 TB: `{fmt_price(data['cost']/data['amount'])}`\n"
+                msg += f"💎 TT: `{fmt_price(current)}`\n"
+                msg += f"{'✅' if profit>=0 else '❌'} LN: `{fmt_price(profit)}` ({profit_percent:+.2f}%)\n\n"
+        
+        total_profit = total_value - total_invest
+        total_profit_percent = (total_profit / total_invest) * 100 if total_invest > 0 else 0
+        
+        msg += "━━━━━━━━━━━━━━━━\n"
+        msg += f"💵 Vốn: `{fmt_price(total_invest)}`\n"
+        msg += f"💰 GT: `{fmt_price(total_value)}`\n"
+        msg += f"{'✅' if total_profit>=0 else '❌'} Tổng LN: `{fmt_price(total_profit)}` ({total_profit_percent:+.2f}%)\n\n"
+        msg += f"🕐 {format_vn_time()}"
+        
+        keyboard = [[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
+        
+        await query.edit_message_text(
+            msg, 
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
     # ==================== PERMISSION COMMAND ====================
     async def perm_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
