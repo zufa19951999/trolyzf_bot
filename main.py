@@ -5340,29 +5340,80 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
             time.sleep(5)
             
         def fix_database_constraints():
-        """Sửa các ràng buộc trong database"""
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            c = conn.cursor()
-            
-            # Bật khóa ngoại
-            c.execute("PRAGMA foreign_keys = ON")
-            
-            # Kiểm tra và sửa bảng expenses
-            c.execute("PRAGMA table_info(expenses)")
-            columns = [col[1] for col in c.fetchall()]
-            
-            # Thêm FOREIGN KEY nếu chưa có
-            if 'category_id' in columns:
-                logger.info("✅ Bảng expenses có cột category_id")
-            else:
-                logger.warning("⚠️ Bảng expenses thiếu cột category_id")
-            
-            conn.close()
-            logger.info("✅ Đã kiểm tra ràng buộc database")
-            
-        except Exception as e:
-            logger.error(f"❌ Lỗi sửa database: {e}")
+            """Sửa các ràng buộc trong database"""
+            conn = None
+            try:
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                
+                # Bật khóa ngoại
+                c.execute("PRAGMA foreign_keys = ON")
+                logger.info("✅ Đã bật FOREIGN_KEY support")
+                
+                # Kiểm tra bảng expenses có cột category_id không
+                c.execute("PRAGMA table_info(expenses)")
+                columns = [col[1] for col in c.fetchall()]
+                
+                if 'category_id' in columns:
+                    logger.info("✅ Bảng expenses có cột category_id")
+                else:
+                    logger.warning("⚠️ Bảng expenses thiếu cột category_id - Đang thêm...")
+                    try:
+                        c.execute("ALTER TABLE expenses ADD COLUMN category_id INTEGER")
+                        logger.info("✅ Đã thêm cột category_id")
+                    except Exception as e:
+                        logger.error(f"❌ Không thể thêm cột category_id: {e}")
+                
+                # Kiểm tra ràng buộc khóa ngoại
+                c.execute("PRAGMA foreign_key_list(expenses)")
+                fk_list = c.fetchall()
+                
+                has_fk = False
+                for fk in fk_list:
+                    if len(fk) >= 5 and fk[3] == 'category_id' and fk[2] == 'expense_categories':
+                        has_fk = True
+                        logger.info(f"✅ Có ràng buộc khóa ngoại: {fk}")
+                        break
+                
+                if not has_fk:
+                    logger.warning("⚠️ Thiếu ràng buộc khóa ngoại giữa expenses và expense_categories")
+                    logger.warning("   Có thể gây lỗi khi xóa danh mục")
+                
+                # Xóa các chi tiêu có category_id không tồn tại
+                c.execute('''
+                    SELECT COUNT(*) FROM expenses 
+                    WHERE category_id IS NOT NULL 
+                    AND category_id NOT IN (SELECT id FROM expense_categories)
+                ''')
+                orphan_count = c.fetchone()[0]
+                
+                if orphan_count > 0:
+                    logger.warning(f"⚠️ Phát hiện {orphan_count} chi tiêu orphan (không có danh mục)")
+                    c.execute('''
+                        DELETE FROM expenses 
+                        WHERE category_id IS NOT NULL 
+                        AND category_id NOT IN (SELECT id FROM expense_categories)
+                    ''')
+                    deleted = c.rowcount
+                    logger.info(f"✅ Đã xóa {deleted} chi tiêu orphan")
+                
+                conn.commit()
+                
+                # Đếm số lượng để báo cáo
+                c.execute("SELECT COUNT(*) FROM expense_categories")
+                cat_count = c.fetchone()[0]
+                
+                c.execute("SELECT COUNT(*) FROM expenses")
+                exp_count = c.fetchone()[0]
+                
+                logger.info(f"📊 Thống kê: {cat_count} danh mục, {exp_count} chi tiêu")
+                logger.info("✅ Đã kiểm tra và sửa ràng buộc database")
+                
+            except Exception as e:
+                logger.error(f"❌ Lỗi sửa database: {e}")
+            finally:
+                if conn:
+                    conn.close()
             
         # ===== THÊM PHẦN KIỂM TRA TỔNG THỂ VÀO ĐÂY =====
         logger.info("🔍 KIỂM TRA TỔNG THỂ HỆ THỐNG...")
