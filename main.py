@@ -5702,3 +5702,4 @@ except Exception as e:
     logger.critical(f"💥 LỖI NGHIÊM TRỌNG: {e}", exc_info=True)
     time.sleep(10)
     os.execv(sys.executable, ['python'] + sys.argv)
+
