@@ -4810,15 +4810,18 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
         
         logger.info(f"🎉 BOT ĐÃ SẴN SÀNG! {format_vn_time()}")
 
+    # ==================== MAIN ====================
     if __name__ == '__main__':
         try:
             logger.info("🚀 KHỞI ĐỘNG CRYPTO BOT - RENDER OPTIMIZED")
             logger.info(f"🕐 Thời gian: {format_vn_time()}")
             
+            # Tạo application
             app = Application.builder().token(TELEGRAM_TOKEN).build()
             app.bot_data = {}
             logger.info("✅ Đã tạo Telegram Application")
-            
+
+            # Đăng ký handlers
             app.add_handler(CommandHandler("start", start))
             app.add_handler(CommandHandler("help", help_command))
             app.add_handler(CommandHandler("menu", menu_command))
@@ -4866,18 +4869,27 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
             
             logger.info("✅ Đã đăng ký handlers")
             
+            # Khởi động thông minh
             smart_startup()
             
+            # Chạy bot
             if render_config.is_render and render_config.render_url:
+                # Webhook mode: Flask đã chạy, cần giữ main thread alive
                 logger.info("⏳ Bot running in webhook mode...")
                 while True:
                     time.sleep(60)
                     check_memory_usage()
             else:
+                # Polling mode
                 logger.info("⏳ Bot running in polling mode...")
                 app.run_polling(timeout=30, drop_pending_updates=True)
-        except KeyboardInterrupt:
-            logger.info("👋 Bot stopped by user")
+            
         except Exception as e:
-            logger.error(f"Lỗi: {e}")
-            await update.message.reply_text("❌ Có lỗi xảy ra!")
+            logger.error(f"❌ LỖI: {e}", exc_info=True)
+            time.sleep(5)
+            os.execv(sys.executable, ['python'] + sys.argv)
+
+except Exception as e:
+    logger.critical(f"💥 LỖI NGHIÊM TRỌNG: {e}", exc_info=True)
+    time.sleep(10)
+    os.execv(sys.executable, ['python'] + sys.argv)
