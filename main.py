@@ -6060,67 +6060,67 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
 
     # ==================== MAIN ====================
     if __name__ == '__main__':
-        logger.info("🚀 KHỞI ĐỘNG CRYPTO BOT - RENDER OPTIMIZED")
-        logger.info(f"🕐 Thời gian: {format_vn_time()}")
-        
-        # Tạo application
-        app = Application.builder().token(TELEGRAM_TOKEN).build()
-        app.bot_data = {}
-        logger.info("✅ Đã tạo Telegram Application")
-        
-        # Đăng ký handlers
-        app.add_handler(CommandHandler("start", start))
-        app.add_handler(CommandHandler("help", help_command))
-        app.add_handler(CommandHandler("menu", menu_command))
-        app.add_handler(CommandHandler("usdt", usdt_command))
-        app.add_handler(CommandHandler("s", s_command))
-        app.add_handler(CommandHandler("buy", buy_command))
-        app.add_handler(CommandHandler("sell", sell_command))
-        app.add_handler(CommandHandler("edit", edit_command))
-        app.add_handler(CommandHandler("del", delete_tx_command))
-        app.add_handler(CommandHandler("delete", delete_tx_command))
-        app.add_handler(CommandHandler("xoa", delete_tx_command))
-        app.add_handler(CommandHandler("alert", alert_command))
-        app.add_handler(CommandHandler("alerts", alerts_command))
-        app.add_handler(CommandHandler("stats", stats_command))
-        app.add_handler(CommandHandler("perm", perm_command))
-        app.add_handler(CommandHandler("whoami", whoami_command))
-        app.add_handler(CommandHandler("permgrant", quick_grant_command))
-        app.add_handler(CommandHandler("getid", getid_command))
-        app.add_handler(CommandHandler("syncusers", sync_users_command))
-        app.add_handler(CommandHandler("view", view_portfolio_command))
-        app.add_handler(CommandHandler("users", list_users_command))
-        app.add_handler(CommandHandler("syncadmins", sync_admins_command))
-        app.add_handler(CommandHandler("checkperm", check_perm_command))
-        app.add_handler(CommandHandler("syncdata", sync_data_command))
-        app.add_handler(CommandHandler("owner", owner_panel))
-        app.add_handler(CommandHandler("debugperm", debug_perm_command))
-        app.add_handler(CommandHandler("setupgroup", setup_group_command))
-        app.add_handler(CommandHandler("groupinfo", group_info_command))
-        app.add_handler(CommandHandler("addadmin", add_group_admin))
-        app.add_handler(CommandHandler("hide", hide_keyboard))
-        app.add_handler(CommandHandler("balance", balance_command))
-        app.add_handler(CommandHandler("canhdoi", balance_command))
-        app.add_handler(CommandHandler("thuchi", balance_command))
-        app.add_handler(CommandHandler("addadmin", add_admin_command))
-        app.add_handler(CommandHandler("listadmin", list_admin_command))
-        app.add_handler(CommandHandler("removeadmin", remove_admin_command))
-        app.add_handler(CommandHandler("xoadm", delete_category_command))
-        app.add_handler(CommandHandler("xoacategory", delete_category_command))
-        app.add_handler(CommandHandler("xoadanhmuc", delete_category_command))
-        app.add_handler(CommandHandler("xoadanhmuc", delete_category_command))
-        app.add_handler(CommandHandler("delcat", delete_category_command))
-        app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_chat_members))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-        app.add_handler(CallbackQueryHandler(handle_callback))
-        
-        logger.info("✅ Đã đăng ký handlers")
-        
-        # Khởi động thông minh
-        smart_startup()
-        
-        # Chạy bot
         try:
+            logger.info("🚀 KHỞI ĐỘNG CRYPTO BOT - RENDER OPTIMIZED")
+            logger.info(f"🕐 Thời gian: {format_vn_time()}")
+            
+            # Tạo application
+            app = Application.builder().token(TELEGRAM_TOKEN).build()
+            app.bot_data = {}
+            logger.info("✅ Đã tạo Telegram Application")
+            
+            # Đăng ký handlers
+            app.add_handler(CommandHandler("start", start))
+            app.add_handler(CommandHandler("help", help_command))
+            app.add_handler(CommandHandler("menu", menu_command))
+            app.add_handler(CommandHandler("usdt", usdt_command))
+            app.add_handler(CommandHandler("s", s_command))
+            app.add_handler(CommandHandler("buy", buy_command))
+            app.add_handler(CommandHandler("sell", sell_command))
+            app.add_handler(CommandHandler("edit", edit_command))
+            app.add_handler(CommandHandler("del", delete_tx_command))
+            app.add_handler(CommandHandler("delete", delete_tx_command))
+            app.add_handler(CommandHandler("xoa", delete_tx_command))
+            app.add_handler(CommandHandler("alert", alert_command))
+            app.add_handler(CommandHandler("alerts", alerts_command))
+            app.add_handler(CommandHandler("stats", stats_command))
+            app.add_handler(CommandHandler("perm", perm_command))
+            app.add_handler(CommandHandler("whoami", whoami_command))
+            app.add_handler(CommandHandler("permgrant", quick_grant_command))
+            app.add_handler(CommandHandler("getid", getid_command))
+            app.add_handler(CommandHandler("syncusers", sync_users_command))
+            app.add_handler(CommandHandler("view", view_portfolio_command))
+            app.add_handler(CommandHandler("users", list_users_command))
+            app.add_handler(CommandHandler("syncadmins", sync_admins_command))
+            app.add_handler(CommandHandler("checkperm", check_perm_command))
+            app.add_handler(CommandHandler("syncdata", sync_data_command))
+            app.add_handler(CommandHandler("owner", owner_panel))
+            app.add_handler(CommandHandler("debugperm", debug_perm_command))
+            app.add_handler(CommandHandler("setupgroup", setup_group_command))
+            app.add_handler(CommandHandler("groupinfo", group_info_command))
+            app.add_handler(CommandHandler("addadmin", add_group_admin))
+            app.add_handler(CommandHandler("hide", hide_keyboard))
+            app.add_handler(CommandHandler("balance", balance_command))
+            app.add_handler(CommandHandler("canhdoi", balance_command))
+            app.add_handler(CommandHandler("thuchi", balance_command))
+            app.add_handler(CommandHandler("addadmin", add_admin_command))
+            app.add_handler(CommandHandler("listadmin", list_admin_command))
+            app.add_handler(CommandHandler("removeadmin", remove_admin_command))
+            app.add_handler(CommandHandler("xoadm", delete_category_command))
+            app.add_handler(CommandHandler("xoacategory", delete_category_command))
+            app.add_handler(CommandHandler("xoadanhmuc", delete_category_command))
+            app.add_handler(CommandHandler("xoadanhmuc", delete_category_command))
+            app.add_handler(CommandHandler("delcat", delete_category_command))
+            app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_chat_members))
+            app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+            app.add_handler(CallbackQueryHandler(handle_callback))
+            
+            logger.info("✅ Đã đăng ký handlers")
+            
+            # Khởi động thông minh
+            smart_startup()
+            
+            # Chạy bot
             if render_config.is_render and render_config.render_url:
                 logger.info("⏳ Bot running in webhook mode...")
                 while True:
@@ -6129,6 +6129,7 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
             else:
                 logger.info("⏳ Bot running in polling mode...")
                 app.run_polling(timeout=30, drop_pending_updates=True)
+                
         except KeyboardInterrupt:
             logger.info("👋 Bot stopped by user")
         except Exception as e:
