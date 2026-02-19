@@ -5197,7 +5197,14 @@ try:
                 
         except Exception as e:
             logger.error(f"Lỗi callback: {e}")
-            await safe_edit_message(query, "❌ Có lỗi xảy ra!")
+            # Gửi message không Markdown để tránh lỗi
+            try:
+                await query.edit_message_text(
+                    f"❌ Có lỗi xảy ra: {str(e)[:100]}", 
+                    parse_mode=None
+                )
+            except:
+                pass
 
     # ==================== WEBHOOK SETUP ====================
     async def setup_webhook():
