@@ -6068,7 +6068,7 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
         app.bot_data = {}
         logger.info("✅ Đã tạo Telegram Application")
         
-        # Đăng ký handlers (GIỮ NGUYÊN PHẦN NÀY)
+        # Đăng ký handlers
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CommandHandler("help", help_command))
         app.add_handler(CommandHandler("menu", menu_command))
@@ -6120,11 +6120,17 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
         smart_startup()
         
         # Chạy bot
-        if render_config.is_render and render_config.render_url:
-            logger.info("⏳ Bot running in webhook mode...")
-            while True:
-                time.sleep(60)
-                check_memory_usage()
-        else:
-            logger.info("⏳ Bot running in polling mode...")
-            app.run_polling(timeout=30, drop_pending_updates=True)
+        try:
+            if render_config.is_render and render_config.render_url:
+                logger.info("⏳ Bot running in webhook mode...")
+                while True:
+                    time.sleep(60)
+                    check_memory_usage()
+            else:
+                logger.info("⏳ Bot running in polling mode...")
+                app.run_polling(timeout=30, drop_pending_updates=True)
+        except KeyboardInterrupt:
+            logger.info("👋 Bot stopped by user")
+        except Exception as e:
+            logger.error(f"❌ LỖI: {e}", exc_info=True)
+            time.sleep(5)
