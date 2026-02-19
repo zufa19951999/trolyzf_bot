@@ -55,10 +55,10 @@ def load_group_owners():
         for group_id, owner_id in rows:
             GROUP_OWNERS[group_id] = owner_id
         conn.close()
-        logger.info(f"✅ Loaded {len(GROUP_OWNERS)} group owners")
+        logger.info(f"✅ Loaded {len(GROUP_OWNERS)} group owners from DB")
     except Exception as e:
         logger.error(f"❌ Lỗi load group owners: {e}")
-
+        
 def set_group_owner(group_id, owner_id):
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -75,8 +75,49 @@ def set_group_owner(group_id, owner_id):
         return False
 
 def get_group_owner(group_id):
-    return GROUP_OWNERS.get(group_id, OWNER_ID)
-
+    """Lấy owner_id của group, ưu tiên từ RAM, nếu không có thì đọc từ DB"""
+    # Kiểm tra trong RAM trước
+    owner_id = GROUP_OWNERS.get(group_id)
+    if owner_id:
+        return owner_id
+    
+    # Nếu không có trong RAM, đọc từ database
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT owner_id FROM group_owners WHERE group_id = ?", (group_id,))
+        result = c.fetchone()
+        conn.close()
+        
+        if result:
+            owner_id = result[0]
+            # Lưu lại vào RAM cho lần sau
+            GROUP_OWNERS[group_id] = owner_id
+            logger.info(f"✅ Loaded owner {owner_id} for group {group_id} from DB")
+            return owner_id
+    except Exception as e:
+        logger.error(f"❌ Lỗi đọc group owner từ DB: {e}")
+    
+    # Fallback về OWNER_ID
+    return OWNER_ID
+    
+def load_group_owner(group_id):
+    """Load một group cụ thể vào RAM"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT owner_id FROM group_owners WHERE group_id = ?", (group_id,))
+        result = c.fetchone()
+        conn.close()
+        
+        if result:
+            GROUP_OWNERS[group_id] = result[0]
+            return result[0]
+    except Exception as e:
+        logger.error(f"❌ Lỗi load group owner {group_id}: {e}")
+    
+    return None
+    
 def is_group_owner(group_id, user_id):
     return user_id == get_group_owner(group_id)
 
@@ -813,6 +854,7 @@ try:
         finally:
             if conn:
                 conn.close()
+
 
     def check_user_access(group_id, user_id, required_role='user'):
         try:
