@@ -1176,6 +1176,22 @@ try:
             c = conn.cursor()
             created_at = get_vn_time().strftime("%Y-%m-%d %H:%M:%S")
             
+            # TẠO BẢNG NẾU CHƯA CÓ
+            c.execute('''CREATE TABLE IF NOT EXISTS group_admins
+                         (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                          group_id INTEGER,
+                          admin_id INTEGER,
+                          granted_by INTEGER,
+                          can_view INTEGER DEFAULT 0,
+                          can_edit INTEGER DEFAULT 0,
+                          can_delete INTEGER DEFAULT 0,
+                          can_manage INTEGER DEFAULT 0,
+                          created_at TEXT,
+                          UNIQUE(group_id, admin_id))''')
+            
+            logger.info(f"📝 Đang cấp quyền cho admin {admin_id} trong group {group_id}")
+            logger.info(f"📝 Quyền: {permissions}")
+            
             # Xóa quyền cũ nếu có
             c.execute("DELETE FROM group_admins WHERE group_id = ? AND admin_id = ?", 
                       (group_id, admin_id))
@@ -1192,9 +1208,21 @@ try:
                        created_at))
             
             conn.commit()
-            conn.close()
-            logger.info(f"✅ Granted admin permissions to {admin_id} in group {group_id}")
-            return True
+            
+            # KIỂM TRA LẠI
+            c.execute("SELECT * FROM group_admins WHERE group_id = ? AND admin_id = ?", 
+                      (group_id, admin_id))
+            result = c.fetchone()
+            
+            if result:
+                logger.info(f"✅ Đã lưu thành công: {result}")
+                conn.close()
+                return True
+            else:
+                logger.error("❌ Không tìm thấy dữ liệu sau khi insert")
+                conn.close()
+                return False
+                
         except Exception as e:
             logger.error(f"❌ Lỗi grant admin: {e}")
             return False
@@ -1235,6 +1263,21 @@ try:
         try:
             conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
+            
+            # Tạo bảng nếu chưa có (để đảm bảo)
+            c.execute('''CREATE TABLE IF NOT EXISTS group_admins
+                         (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                          group_id INTEGER,
+                          admin_id INTEGER,
+                          granted_by INTEGER,
+                          can_view INTEGER DEFAULT 0,
+                          can_edit INTEGER DEFAULT 0,
+                          can_delete INTEGER DEFAULT 0,
+                          can_manage INTEGER DEFAULT 0,
+                          created_at TEXT,
+                          UNIQUE(group_id, admin_id))''')
+            
+            # Lấy danh sách admin
             c.execute('''SELECT ga.admin_id, ga.can_view, ga.can_edit, ga.can_delete, ga.can_manage,
                                 u.username, u.first_name, ga.created_at
                          FROM group_admins ga
@@ -1243,6 +1286,8 @@ try:
                          ORDER BY ga.created_at''', (group_id,))
             admins = c.fetchall()
             conn.close()
+            
+            logger.info(f"📋 Tìm thấy {len(admins)} admin trong group {group_id}")
             return admins
         except Exception as e:
             logger.error(f"❌ Lỗi get_all_admins: {e}")
@@ -3888,6 +3933,81 @@ try:
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
+    @auto_update_user
+    async def debug_db_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Debug database - chỉ dành cho owner"""
+        user_id = update.effective_user.id
+        
+        # Chỉ owner bot mới dùng được
+        if user_id != OWNER_ID:
+            await update.message.reply_text("❌ Chỉ owner mới dùng được!")
+            return
+        
+        chat_id = update.effective_chat.id
+        
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        
+        # Kiểm tra các bảng tồn tại
+        c.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = c.fetchall()
+        
+        msg = "📊 *DATABASE INFO*\n━━━━━━━━━━━━━━━━\n\n"
+        msg += f"📍 Database: `{DB_PATH}`\n\n"
+        
+        msg += "*📋 CÁC BẢNG:*\n"
+        for table in tables:
+            msg += f"• {table[0]}\n"
+        
+        msg += "\n"
+        
+        # Kiểm tra bảng group_admins
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='group_admins'")
+        if c.fetchone():
+            # Đếm số admin trong group này
+            c.execute("SELECT COUNT(*) FROM group_admins WHERE group_id = ?", (chat_id,))
+            count = c.fetchone()[0]
+            msg += f"*👥 ADMIN TRONG GROUP NÀY:* {count} người\n"
+            
+            if count > 0:
+                c.execute('''SELECT ga.admin_id, ga.can_view, ga.can_edit, ga.can_delete, ga.can_manage,
+                                    u.username, ga.created_at
+                             FROM group_admins ga
+                             LEFT JOIN users u ON ga.admin_id = u.user_id
+                             WHERE ga.group_id = ?''', (chat_id,))
+                admins = c.fetchall()
+                for admin in admins:
+                    admin_id, view, edit, delete, manage, username, created = admin
+                    msg += f"\n  • ID: `{admin_id}`\n"
+                    msg += f"    Username: @{username if username else 'None'}\n"
+                    msg += f"    Quyền: {'👁 ' if view else ''}{'✏️ ' if edit else ''}{'🗑 ' if delete else ''}{'🔐 ' if manage else ''}\n"
+                    msg += f"    Ngày thêm: {created[:10]}\n"
+        else:
+            msg += "❌ Bảng `group_admins` CHƯA TỒN TẠI!\n"
+        
+        # Kiểm tra thông tin owner group
+        owner_id = get_group_owner(chat_id)
+        msg += f"\n*👑 OWNER GROUP:* "
+        if owner_id:
+            msg += f"`{owner_id}`\n"
+        else:
+            msg += "Chưa có owner\n"
+        
+        conn.close()
+        
+        msg += f"\n🕐 {format_vn_time()}"
+        
+        # Gửi tin nhắn (chia nhỏ nếu quá dài)
+        if len(msg) > 4000:
+            chunks = [msg[i:i+3500] for i in range(0, len(msg), 3500)]
+            for i, chunk in enumerate(chunks, 1):
+                await update.message.reply_text(
+                    f"{chunk}\n\n*(Phần {i}/{len(chunks)})*",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+        else:
+            await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+
     # ==================== PERMISSION COMMAND ====================
     async def perm_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
@@ -6036,6 +6156,7 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
             app.add_handler(CommandHandler("xoadanhmuc", delete_category_command))
             app.add_handler(CommandHandler("xoadanhmuc", delete_category_command))
             app.add_handler(CommandHandler("delcat", delete_category_command))
+            app.add_handler(CommandHandler("debugdb", debug_db_command))
             app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_chat_members))
             app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
             app.add_handler(CallbackQueryHandler(handle_callback))
