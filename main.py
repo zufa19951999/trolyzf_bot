@@ -1169,165 +1169,7 @@ try:
             if conn:
                 conn.close()
 
-    def grant_admin_permission(group_id, admin_id, granted_by, permissions):
-        """Cấp quyền admin (chỉ owner mới được dùng)"""
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            c = conn.cursor()
-            created_at = get_vn_time().strftime("%Y-%m-%d %H:%M:%S")
-            
-            # TẠO BẢNG NẾU CHƯA CÓ
-            c.execute('''CREATE TABLE IF NOT EXISTS group_admins
-                         (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                          group_id INTEGER,
-                          admin_id INTEGER,
-                          granted_by INTEGER,
-                          can_view INTEGER DEFAULT 0,
-                          can_edit INTEGER DEFAULT 0,
-                          can_delete INTEGER DEFAULT 0,
-                          can_manage INTEGER DEFAULT 0,
-                          created_at TEXT,
-                          UNIQUE(group_id, admin_id))''')
-            
-            print(f"🔍 DEBUG: Đang thêm admin {admin_id} vào group {group_id}")
-            print(f"🔍 DEBUG: Quyền: {permissions}")
-            
-            # Xóa quyền cũ nếu có
-            c.execute("DELETE FROM group_admins WHERE group_id = ? AND admin_id = ?", 
-                      (group_id, admin_id))
-            print(f"🔍 DEBUG: Đã xóa quyền cũ")
-            
-            # Thêm quyền mới
-            c.execute('''INSERT INTO group_admins 
-                         (group_id, admin_id, granted_by, can_view, can_edit, can_delete, can_manage, created_at)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-                      (group_id, admin_id, granted_by,
-                       permissions.get('view', 0),
-                       permissions.get('edit', 0),
-                       permissions.get('delete', 0),
-                       permissions.get('manage', 0),
-                       created_at))
-            print(f"🔍 DEBUG: Đã thêm quyền mới")
-            
-            conn.commit()
-            print(f"🔍 DEBUG: Đã commit")
-            
-            # KIỂM TRA LẠI
-            c.execute("SELECT * FROM group_admins WHERE group_id = ? AND admin_id = ?", 
-                      (group_id, admin_id))
-            result = c.fetchone()
-            
-            if result:
-                print(f"✅ DEBUG: Đã lưu thành công: {result}")
-                conn.close()
-                return True
-            else:
-                print(f"❌ DEBUG: KHÔNG tìm thấy dữ liệu sau khi insert")
-                conn.close()
-                return False
-                
-        except Exception as e:
-            print(f"❌ DEBUG: Lỗi grant admin: {e}")
-            return False
     
-    def check_admin_permission(group_id, admin_id, permission='view'):
-        """Kiểm tra quyền của admin"""
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            c = conn.cursor()
-            c.execute('''SELECT can_view, can_edit, can_delete, can_manage 
-                         FROM group_admins 
-                         WHERE group_id = ? AND admin_id = ?''',
-                      (group_id, admin_id))
-            result = c.fetchone()
-            conn.close()
-            
-            if not result:
-                return False
-            
-            can_view, can_edit, can_delete, can_manage = result
-            
-            if permission == 'view':
-                return can_view == 1
-            elif permission == 'edit':
-                return can_edit == 1
-            elif permission == 'delete':
-                return can_delete == 1
-            elif permission == 'manage':
-                return can_manage == 1
-            
-            return False
-        except Exception as e:
-            logger.error(f"❌ Lỗi check_admin: {e}")
-            return False
-    
-    def get_all_admins(group_id):
-        """Lấy danh sách tất cả admin trong group"""
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            c = conn.cursor()
-            
-            # ĐẢM BẢO BẢNG TỒN TẠI
-            c.execute('''CREATE TABLE IF NOT EXISTS group_admins
-                         (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                          group_id INTEGER,
-                          admin_id INTEGER,
-                          granted_by INTEGER,
-                          can_view INTEGER DEFAULT 0,
-                          can_edit INTEGER DEFAULT 0,
-                          can_delete INTEGER DEFAULT 0,
-                          can_manage INTEGER DEFAULT 0,
-                          created_at TEXT,
-                          UNIQUE(group_id, admin_id))''')
-            
-            # LẤY TẤT CẢ DỮ LIỆU KHÔNG CẦN JOIN (để test)
-            c.execute('''SELECT admin_id, can_view, can_edit, can_delete, can_manage, created_at
-                         FROM group_admins 
-                         WHERE group_id = ?
-                         ORDER BY created_at''', (group_id,))
-            
-            rows = c.fetchall()
-            logger.info(f"📋 Raw data from group_admins for {group_id}: {rows}")
-            
-            # Nếu có dữ liệu, format lại
-            admins = []
-            for row in rows:
-                admin_id, view, edit, delete, manage, created = row
-                
-                # Lấy thông tin username riêng
-                c.execute("SELECT username, first_name FROM users WHERE user_id = ?", (admin_id,))
-                user_info = c.fetchone()
-                username = user_info[0] if user_info else None
-                first_name = user_info[1] if user_info else None
-                
-                admins.append((admin_id, view, edit, delete, manage, username, first_name, created))
-            
-            conn.close()
-            logger.info(f"📋 Đã format {len(admins)} admin cho group {group_id}")
-            return admins
-            
-        except Exception as e:
-            logger.error(f"❌ Lỗi get_all_admins: {e}")
-            return []
-    
-    def revoke_admin_permission(group_id, admin_id):
-        """Thu hồi quyền admin"""
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            c = conn.cursor()
-            c.execute("DELETE FROM group_admins WHERE group_id = ? AND admin_id = ?", 
-                      (group_id, admin_id))
-            conn.commit()
-            affected = c.rowcount
-            conn.close()
-            
-            if affected > 0:
-                logger.info(f"✅ Revoked admin permissions from {admin_id} in group {group_id}")
-                return True
-            return False
-        except Exception as e:
-            logger.error(f"❌ Lỗi revoke admin: {e}")
-            return False
 
     # ==================== GROUP OWNER MANAGEMENT ====================
     GROUP_OWNERS = {}
@@ -1362,15 +1204,75 @@ try:
         except Exception as e:
             logger.error(f"❌ Lỗi set group owner: {e}")
             return False
+
+    def can_view_data(chat_id, user_id, owner_id):
+        """
+        Kiểm tra xem user có quyền xem dữ liệu của owner không
+        """
+        # Nếu là owner -> OK
+        if user_id == owner_id:
+            return True
+        
+        # Nếu là owner group -> OK
+        if is_group_owner(chat_id, user_id):
+            return True
+        
+        # Kiểm tra trong bảng group_admins
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute('''SELECT can_view FROM group_admins 
+                         WHERE group_id = ? AND admin_id = ?''', (chat_id, user_id))
+            result = c.fetchone()
+            conn.close()
+            return result and result[0] == 1
+        except:
+            return False
     
-    def get_group_owner(group_id):
-        """Lấy chủ sở hữu của group"""
-        return GROUP_OWNERS.get(group_id)
+    def can_edit_data(chat_id, user_id, owner_id):
+        """Kiểm tra quyền sửa"""
+        if user_id == owner_id or is_group_owner(chat_id, user_id):
+            return True
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute('''SELECT can_edit FROM group_admins 
+                         WHERE group_id = ? AND admin_id = ?''', (chat_id, user_id))
+            result = c.fetchone()
+            conn.close()
+            return result and result[0] == 1
+        except:
+            return False
     
-    def is_group_owner(group_id, user_id):
-        """Kiểm tra có phải chủ sở hữu của group không"""
-        owner = get_group_owner(group_id)
-        return owner and user_id == owner
+    def can_delete_data(chat_id, user_id, owner_id):
+        """Kiểm tra quyền xóa"""
+        if user_id == owner_id or is_group_owner(chat_id, user_id):
+            return True
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute('''SELECT can_delete FROM group_admins 
+                         WHERE group_id = ? AND admin_id = ?''', (chat_id, user_id))
+            result = c.fetchone()
+            conn.close()
+            return result and result[0] == 1
+        except:
+            return False
+    
+    def can_manage_admins(chat_id, user_id, owner_id):
+        """Kiểm tra quyền quản lý admin"""
+        if user_id == owner_id or is_group_owner(chat_id, user_id):
+            return True
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute('''SELECT can_manage FROM group_admins 
+                         WHERE group_id = ? AND admin_id = ?''', (chat_id, user_id))
+            result = c.fetchone()
+            conn.close()
+            return result and result[0] == 1
+        except:
+            return False
     
     # ==================== USER FUNCTIONS WITH AUTO-UPDATE ====================
     async def update_user_info_async(user):
@@ -2510,35 +2412,16 @@ try:
         chat_type = update.effective_chat.type
         current_user = update.effective_user.id
         
-        # Nếu là private chat -> ai cũng xem được data của mình
+        # Nếu là private chat -> OK
         if chat_type == 'private':
             pass
         else:
-            # TRONG GROUP: kiểm tra quyền từ bảng group_admins
-            conn = sqlite3.connect(DB_PATH)
-            c = conn.cursor()
-            
-            # Kiểm tra xem có phải owner group không
-            c.execute("SELECT owner_id FROM group_owners WHERE group_id = ?", (chat_id,))
-            owner_result = c.fetchone()
-            is_owner = (owner_result and owner_result[0] == current_user)
-            
-            # Kiểm tra quyền admin từ bảng group_admins
-            c.execute('''SELECT can_view FROM group_admins 
-                         WHERE group_id = ? AND admin_id = ?''', (chat_id, current_user))
-            admin_result = c.fetchone()
-            can_view = admin_result[0] if admin_result else False
-            
-            conn.close()
-            
-            # CHO PHÉP NẾU: là owner HOẶC có quyền view
-            if not (is_owner or can_view):
+            # DÙNG HÀM THỐNG NHẤT
+            if not can_view_data(chat_id, current_user, owner_id):
                 await update.message.reply_text(
                     f"❌ Bạn không có quyền xem dữ liệu!\n\n"
                     f"• ID của bạn: `{current_user}`\n"
-                    f"• Là owner group: {'✅' if is_owner else '❌'}\n"
-                    f"• Có quyền view: {'✅' if can_view else '❌'}\n\n"
-                    f"Vui lòng liên hệ chủ sở hữu group để được cấp quyền.",
+                    f"• Liên hệ chủ sở hữu để được cấp quyền.",
                     parse_mode=ParseMode.MARKDOWN
                 )
                 return
