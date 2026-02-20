@@ -4370,7 +4370,35 @@ try:
             logger.info("🔹 Đây là callback khác")
             
         # ===== KẾT THÚC THÊM LOG =====
-        
+        # ===== THÊM HÀM XỬ LÝ CHUYỂN HƯỚNG VÀO ĐÂY =====
+        async def handle_del_category(cat_id):
+            """Xử lý xóa danh mục khi bị chuyển hướng từ del_ handler"""
+            logger.info(f"📂 Chuyển hướng đến xóa danh mục {cat_id}")
+            owner_id = ctx.bot_data.get('effective_user_id', query.from_user.id)
+            
+            categories = get_expense_categories(owner_id)
+            category_name = "Không xác định"
+            for cat in categories:
+                if cat[0] == int(cat_id):
+                    category_name = cat[1]
+                    break
+            
+            safe_category_name = escape_markdown(category_name)
+            
+            keyboard = [[InlineKeyboardButton("✅ Xác nhận xóa", callback_data=f"confirm_del_cat_{cat_id}"),
+                         InlineKeyboardButton("❌ Hủy", callback_data="expense_categories")]]
+            
+            msg = (f"⚠️ *CẢNH BÁO: XÓA DANH MỤC*\n━━━━━━━━━━━━━━━━\n\n"
+                   f"📋 Danh mục: *{safe_category_name}* (ID: {cat_id})\n\n"
+                   f"❗️ Hành động này sẽ xóa:\n"
+                   f"• Danh mục *{safe_category_name}*\n"
+                   f"• Tất cả chi tiêu trong danh mục này\n\n"
+                   f"❌ *Không thể khôi phục!*\n\n"
+                   f"Bạn có chắc chắn muốn xóa?")
+            
+            safe_msg = escape_markdown(msg)
+            await safe_edit_message(query, safe_msg, reply_markup=InlineKeyboardMarkup(keyboard))
+            
         data = query.data
         
         try:
@@ -4797,16 +4825,45 @@ try:
             elif data.startswith("del_"):
                 tx_id_str = data.replace("del_", "")
                 
-                # Kiểm tra nếu là cat_ thì chuyển hướng
+                # Kiểm tra nếu là cat_ thì xử lý như xóa danh mục
                 if tx_id_str.startswith("cat_"):
-                    logger.info(f"🔄 Chuyển hướng del_cat_ từ del_ handler")
-                    # Tạo lại data đúng và gọi lại handler
-                    new_data = f"del_cat_{tx_id_str[4:]}"
-                    query.data = new_data
-                    # Gọi lại hàm xử lý với data mới
-                    await handle_callback(update, ctx)
+                    logger.info(f"🔄 Phát hiện del_cat_ trong del_ handler, chuyển sang xóa danh mục")
+                    cat_id = tx_id_str[4:]  # Lấy phần số sau "cat_"
+                    
+                    try:
+                        category_id = int(cat_id)
+                    except ValueError:
+                        logger.error(f"❌ Lỗi: cat_id không phải số: {cat_id}")
+                        await safe_edit_message(query, f"❌ Lỗi: ID danh mục không hợp lệ")
+                        return
+                    
+                    owner_id = ctx.bot_data.get('effective_user_id', query.from_user.id)
+                    
+                    categories = get_expense_categories(owner_id)
+                    category_name = "Không xác định"
+                    for cat in categories:
+                        if cat[0] == category_id:
+                            category_name = cat[1]
+                            break
+                    
+                    safe_category_name = escape_markdown(category_name)
+                    
+                    keyboard = [[InlineKeyboardButton("✅ Xác nhận xóa", callback_data=f"confirm_del_cat_{category_id}"),
+                                 InlineKeyboardButton("❌ Hủy", callback_data="expense_categories")]]
+                    
+                    msg = (f"⚠️ *CẢNH BÁO: XÓA DANH MỤC*\n━━━━━━━━━━━━━━━━\n\n"
+                           f"📋 Danh mục: *{safe_category_name}* (ID: {category_id})\n\n"
+                           f"❗️ Hành động này sẽ xóa:\n"
+                           f"• Danh mục *{safe_category_name}*\n"
+                           f"• Tất cả chi tiêu trong danh mục này\n\n"
+                           f"❌ *Không thể khôi phục!*\n\n"
+                           f"Bạn có chắc chắn muốn xóa?")
+                    
+                    safe_msg = escape_markdown(msg)
+                    await safe_edit_message(query, safe_msg, reply_markup=InlineKeyboardMarkup(keyboard))
                     return
                 
+                # Xử lý xóa giao dịch coin bình thường
                 msg = f"⚠️ *Xác nhận xóa giao dịch #{tx_id_str}?*\n\n🕐 {format_vn_time_short()}"
                 safe_msg = escape_markdown(msg)
                 keyboard = [[InlineKeyboardButton("✅ Có", callback_data=f"confirm_del_{tx_id_str}"),
