@@ -4348,6 +4348,27 @@ try:
         logger.info(f"   • From user: {query.from_user.id} (@{query.from_user.username})")
         logger.info(f"   • Chat ID: {query.message.chat.id}")
         logger.info(f"   • Message ID: {query.message.message_id}")
+        
+        # PHÂN LOẠI CALLBACK
+        if query.data.startswith("del_cat_"):
+            logger.info("📂 Đây là callback XÓA DANH MỤC")
+        elif query.data.startswith("confirm_del_cat_"):
+            logger.info("📂 Đây là callback XÁC NHẬN XÓA DANH MỤC")
+        elif query.data.startswith("del_"):
+            logger.info("💰 Đây là callback XÓA GIAO DỊCH COIN")
+        elif query.data.startswith("confirm_del_"):
+            logger.info("💰 Đây là callback XÁC NHẬN XÓA GIAO DỊCH COIN")
+        elif query.data.startswith("edit_"):
+            logger.info("✏️ Đây là callback SỬA GIAO DỊCH")
+        elif query.data.startswith("price_"):
+            logger.info("💵 Đây là callback XEM GIÁ COIN")
+        elif query.data.startswith("view_"):
+            logger.info("👁 Đây là callback XEM")
+        elif query.data.startswith("balance_"):
+            logger.info("⚖️ Đây là callback XEM CÂN ĐỐI")
+        else:
+            logger.info("🔹 Đây là callback khác")
+            
         # ===== KẾT THÚC THÊM LOG =====
         
         data = query.data
@@ -4774,16 +4795,40 @@ try:
                 await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
             
             elif data.startswith("del_"):
-                tx_id = data.replace("del_", "")
+                tx_id_str = data.replace("del_", "")
                 
-                msg = f"⚠️ *Xác nhận xóa giao dịch #{tx_id}?*\n\n🕐 {format_vn_time_short()}"
-                keyboard = [[InlineKeyboardButton("✅ Có", callback_data=f"confirm_del_{tx_id}"),
+                # Kiểm tra nếu là cat_ thì chuyển hướng
+                if tx_id_str.startswith("cat_"):
+                    logger.info(f"🔄 Chuyển hướng del_cat_ từ del_ handler")
+                    # Tạo lại data đúng và gọi lại handler
+                    new_data = f"del_cat_{tx_id_str[4:]}"
+                    query.data = new_data
+                    # Gọi lại hàm xử lý với data mới
+                    await handle_callback(update, ctx)
+                    return
+                
+                msg = f"⚠️ *Xác nhận xóa giao dịch #{tx_id_str}?*\n\n🕐 {format_vn_time_short()}"
+                safe_msg = escape_markdown(msg)
+                keyboard = [[InlineKeyboardButton("✅ Có", callback_data=f"confirm_del_{tx_id_str}"),
                              InlineKeyboardButton("❌ Không", callback_data="edit_transactions")]]
                 
-                await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                await safe_edit_message(query, safe_msg, reply_markup=InlineKeyboardMarkup(keyboard))
             
             elif data.startswith("confirm_del_"):
-                tx_id = data.replace("confirm_del_", "")
+                tx_id_str = data.replace("confirm_del_", "")
+                
+                # Kiểm tra nếu là cat_ thì bỏ qua
+                if tx_id_str.startswith("cat_"):
+                    logger.warning(f"⚠️ Bỏ qua confirm_del_ với cat_id: {tx_id_str}")
+                    return
+                
+                try:
+                    tx_id = int(tx_id_str)
+                except ValueError:
+                    logger.error(f"❌ Lỗi: tx_id không phải số: {tx_id_str}")
+                    await safe_edit_message(query, f"❌ ID không hợp lệ: {tx_id_str}")
+                    return
+                
                 uid = query.from_user.id
                 
                 conn = sqlite3.connect(DB_PATH)
@@ -4794,16 +4839,19 @@ try:
                 conn.close()
                 
                 if affected > 0:
-                    msg = f"✅ Đã xóa giao dịch #{tx_id}\n\n🕐 {format_vn_time()}"
+                    msg = f"✅ *ĐÃ XÓA GIAO DỊCH*\n━━━━━━━━━━━━━━━━\n\nĐã xóa giao dịch #{tx_id}\n\n🕐 {format_vn_time()}"
                 else:
-                    msg = f"❌ Không thể xóa giao dịch #{tx_id}\n\n🕐 {format_vn_time()}"
+                    msg = f"❌ *LỖI*\n━━━━━━━━━━━━━━━━\n\nKhông thể xóa giao dịch #{tx_id}\n\n🕐 {format_vn_time()}"
+                
+                # Escape message
+                safe_msg = escape_markdown(msg)
                 
                 keyboard = [[InlineKeyboardButton("🔙 Về danh mục", callback_data="show_portfolio")]]
                 
-                await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                await safe_edit_message(query, safe_msg, reply_markup=InlineKeyboardMarkup(keyboard))
 
             elif data.startswith("del_cat_"):
-                # Lấy phần sau "del_cat_"
+                # Phần này đã đúng, giữ nguyên
                 cat_id_str = data.replace("del_cat_", "")
                 try:
                     category_id = int(cat_id_str)
