@@ -4534,6 +4534,15 @@ try:
     async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
+
+        # THÊM LOG CHI TIẾT
+        logger.info("=" * 50)
+        logger.info(f"🔔 CALLBACK NHẬN ĐƯỢC: {query.data}")
+        logger.info(f"   • User: {query.from_user.id} (@{query.from_user.username})")
+        logger.info(f"   • Chat: {query.message.chat.id}")
+        logger.info(f"   • Message ID: {query.message.message_id}")
+        logger.info("=" * 50)
+        
         if query.from_user:
             await update_user_info_async(query.from_user)
         
@@ -4991,79 +5000,228 @@ try:
                 await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
 
             elif data.startswith("edit_"):
-                tx_id = data.replace("edit_", "")
-                uid = query.from_user.id
-                
-                transactions = get_transaction_detail(uid)
-                tx = next((t for t in transactions if str(t[0]) == tx_id), None)
-                
-                if not tx:
-                    msg = f"❌ Không tìm thấy giao dịch #{tx_id}"
-                    await safe_edit_message(query, msg)
-                    return
-                
-                tx_id, symbol, amount, price, date, total = tx
-                
-                msg = (f"✏️ *SỬA GIAO DỊCH #{tx_id}*\n━━━━━━━━━━━━━━━━\n\n"
-                       f"*{symbol}*\n📅 {date}\n"
-                       f"📊 SL: `{amount:.4f}`\n"
-                       f"💰 Giá: `{fmt_price(price)}`\n\n"
-                       f"*Nhập lệnh:*\n`/edit {tx_id} [sl] [giá]`\n\n"
-                       f"🕐 {format_vn_time()}")
-                
-                keyboard = [[InlineKeyboardButton("🗑 Xóa", callback_data=f"del_{tx_id}"),
-                             InlineKeyboardButton("🔙 Quay lại", callback_data="edit_transactions")]]
-                
-                await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
-            
-            elif data.startswith("del_"):
-                tx_id_str = data.replace("del_", "")
-                
-                # Kiểm tra nếu là cat_ thì xử lý như xóa danh mục
-                if tx_id_str.startswith("cat_"):
-                    logger.info(f"🔄 Phát hiện del_cat_ trong del_ handler, chuyển sang xóa danh mục")
-                    cat_id = tx_id_str[4:]  # Lấy phần số sau "cat_"
+                try:
+                    tx_id_str = data.replace("edit_", "")
                     
-                    try:
-                        category_id = int(cat_id)
-                    except ValueError:
-                        logger.error(f"❌ Lỗi: cat_id không phải số: {cat_id}")
-                        await safe_edit_message(query, f"❌ Lỗi: ID danh mục không hợp lệ")
+                    # Kiểm tra nếu là số
+                    if not tx_id_str.isdigit():
+                        logger.error(f"❌ edit_ callback với ID không hợp lệ: {tx_id_str}")
+                        await safe_edit_message(query, "❌ ID không hợp lệ!")
                         return
                     
+                    tx_id = int(tx_id_str)
                     owner_id = ctx.bot_data.get('effective_user_id', query.from_user.id)
+                    current_user_id = query.from_user.id
+                    chat_id = query.message.chat.id
                     
-                    categories = get_expense_categories(owner_id)
-                    category_name = "Không xác định"
-                    for cat in categories:
-                        if cat[0] == category_id:
-                            category_name = cat[1]
-                            break
+                    logger.info(f"✏️ edit_ callback: tx_id={tx_id}, owner_id={owner_id}, current_user={current_user_id}")
                     
-                    safe_category_name = escape_markdown(category_name)
+                    # Lấy chi tiết giao dịch
+                    conn = sqlite3.connect(DB_PATH)
+                    c = conn.cursor()
+                    c.execute('''SELECT id, symbol, amount, buy_price, buy_date, total_cost, user_id 
+                                FROM portfolio WHERE id = ?''', (tx_id,))
+                    tx = c.fetchone()
+                    conn.close()
                     
-                    keyboard = [[InlineKeyboardButton("✅ Xác nhận xóa", callback_data=f"confirm_del_cat_{category_id}"),
-                                 InlineKeyboardButton("❌ Hủy", callback_data="expense_categories")]]
+                    if not tx:
+                        await safe_edit_message(query, f"❌ Không tìm thấy giao dịch #{tx_id}")
+                        return
                     
-                    msg = (f"⚠️ *CẢNH BÁO: XÓA DANH MỤC*\n━━━━━━━━━━━━━━━━\n\n"
-                           f"📋 Danh mục: *{safe_category_name}* (ID: {category_id})\n\n"
-                           f"❗️ Hành động này sẽ xóa:\n"
-                           f"• Danh mục *{safe_category_name}*\n"
-                           f"• Tất cả chi tiêu trong danh mục này\n\n"
-                           f"❌ *Không thể khôi phục!*\n\n"
+                    tx_id, symbol, amount, price, date, total, tx_owner_id = tx
+                    
+                    # Kiểm tra quyền admin
+                    is_admin = check_permission(chat_id, current_user_id, 'edit') or \
+                               check_permission(chat_id, current_user_id, 'delete') or \
+                               check_permission(chat_id, current_user_id, 'manage')
+                    
+                    # Kiểm tra quyền xem/sửa
+                    if tx_owner_id != owner_id and not is_admin and current_user_id != owner_id:
+                        await safe_edit_message(query, "❌ Bạn không có quyền xem giao dịch này!")
+                        return
+                    
+                    # Lấy giá hiện tại
+                    price_data = get_price(symbol)
+                    current_price = price_data['p'] if price_data else 0
+                    profit = (current_price - price) * amount if current_price else 0
+                    profit_percent = ((current_price - price) / price) * 100 if price and current_price else 0
+                    
+                    # Tạo message
+                    msg = (f"📝 *GIAO DỊCH #{tx_id}*\n━━━━━━━━━━━━━━━━\n\n"
+                           f"*{symbol}*\n"
+                           f"📅 Ngày mua: {date}\n"
+                           f"📊 Số lượng: `{amount:.4f}`\n"
+                           f"💰 Giá mua: `{fmt_price(price)}`\n"
+                           f"💵 Tổng vốn: `{fmt_price(total)}`\n"
+                           f"📈 Giá hiện tại: `{fmt_price(current_price)}`\n"
+                           f"{'✅' if profit>=0 else '❌'} Lợi nhuận: `{fmt_price(profit)}` ({profit_percent:+.2f}%)\n\n")
+                    
+                    # Thêm hướng dẫn sửa/xóa nếu có quyền
+                    keyboard = []
+                    if tx_owner_id == owner_id or is_admin or current_user_id == owner_id:
+                        msg += f"*Sửa:* `/edit {tx_id} [sl] [giá]`\n"
+                        msg += f"*Xóa:* `/del {tx_id}`\n\n"
+                        
+                        # Thêm nút sửa/xóa
+                        keyboard.append([
+                            InlineKeyboardButton("✏️ Sửa", callback_data=f"edit_form_{tx_id}"),
+                            InlineKeyboardButton("🗑 Xóa", callback_data=f"del_{tx_id}")
+                        ])
+                    
+                    msg += f"🕐 {format_vn_time()}"
+                    
+                    # Thêm nút quay lại
+                    keyboard.append([InlineKeyboardButton("🔙 Về danh sách", callback_data="edit_transactions")])
+                    
+                    await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                    
+                except Exception as e:
+                    logger.error(f"❌ Lỗi trong edit_ callback: {e}", exc_info=True)
+                    await safe_edit_message(query, "❌ Có lỗi xảy ra!")
+
+            elif data.startswith("edit_form_"):
+                try:
+                    tx_id_str = data.replace("edit_form_", "")
+                    
+                    if not tx_id_str.isdigit():
+                        await safe_edit_message(query, "❌ ID không hợp lệ!")
+                        return
+                    
+                    tx_id = int(tx_id_str)
+                    
+                    # Lấy thông tin giao dịch
+                    conn = sqlite3.connect(DB_PATH)
+                    c = conn.cursor()
+                    c.execute('''SELECT symbol, amount, buy_price FROM portfolio WHERE id = ?''', (tx_id,))
+                    tx = c.fetchone()
+                    conn.close()
+                    
+                    if not tx:
+                        await safe_edit_message(query, f"❌ Không tìm thấy giao dịch #{tx_id}")
+                        return
+                    
+                    symbol, current_amount, current_price = tx
+                    
+                    msg = (f"✏️ *SỬA GIAO DỊCH #{tx_id}*\n━━━━━━━━━━━━━━━━\n\n"
+                           f"*{symbol}*\n"
+                           f"📊 SL hiện tại: `{current_amount:.4f}`\n"
+                           f"💰 Giá hiện tại: `{fmt_price(current_price)}`\n\n"
+                           f"*Nhập lệnh:*\n"
+                           f"`/edit {tx_id} [số lượng mới] [giá mới]`\n\n"
+                           f"*Ví dụ:*\n"
+                           f"`/edit {tx_id} 0.5 45000`\n\n"
+                           f"🕐 {format_vn_time_short()}")
+                    
+                    keyboard = [[InlineKeyboardButton("🔙 Quay lại", callback_data=f"edit_{tx_id}")]]
+                    
+                    await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                    
+                except Exception as e:
+                    logger.error(f"❌ Lỗi trong edit_form_: {e}", exc_info=True)
+                    await safe_edit_message(query, "❌ Có lỗi xảy ra!")
+            
+            elif data.startswith("del_"):
+                try:
+                    tx_id_str = data.replace("del_", "")
+                    
+                    # Kiểm tra nếu là xóa danh mục (cat_)
+                    if tx_id_str.startswith("cat_"):
+                        # Xử lý xóa danh mục (giữ nguyên code cũ)
+                        cat_id = tx_id_str[4:]
+                        if not cat_id.isdigit():
+                            await safe_edit_message(query, "❌ ID danh mục không hợp lệ!")
+                            return
+                        
+                        category_id = int(cat_id)
+                        owner_id = ctx.bot_data.get('effective_user_id', query.from_user.id)
+                        
+                        # Lấy tên danh mục
+                        categories = get_expense_categories(owner_id)
+                        category_name = "Không xác định"
+                        for cat in categories:
+                            if cat[0] == category_id:
+                                category_name = cat[1]
+                                break
+                        
+                        safe_category_name = escape_markdown(category_name)
+                        
+                        keyboard = [[
+                            InlineKeyboardButton("✅ Xác nhận xóa", callback_data=f"confirm_del_cat_{category_id}"),
+                            InlineKeyboardButton("❌ Hủy", callback_data="expense_categories")
+                        ]]
+                        
+                        msg = (f"⚠️ *CẢNH BÁO: XÓA DANH MỤC*\n━━━━━━━━━━━━━━━━\n\n"
+                               f"📋 Danh mục: *{safe_category_name}* (ID: {category_id})\n\n"
+                               f"❗️ Hành động này sẽ xóa:\n"
+                               f"• Danh mục *{safe_category_name}*\n"
+                               f"• Tất cả chi tiêu trong danh mục này\n\n"
+                               f"❌ *Không thể khôi phục!*\n\n"
+                               f"Bạn có chắc chắn muốn xóa?")
+                        
+                        await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                        return
+                    
+                    # Xử lý xóa giao dịch coin
+                    if not tx_id_str.isdigit():
+                        await safe_edit_message(query, "❌ ID không hợp lệ!")
+                        return
+                    
+                    tx_id = int(tx_id_str)
+                    owner_id = ctx.bot_data.get('effective_user_id', query.from_user.id)
+                    current_user_id = query.from_user.id
+                    chat_id = query.message.chat.id
+                    
+                    logger.info(f"🗑 del_ callback: tx_id={tx_id}, owner_id={owner_id}, current_user={current_user_id}")
+                    
+                    # Kiểm tra giao dịch có tồn tại không
+                    conn = sqlite3.connect(DB_PATH)
+                    c = conn.cursor()
+                    c.execute('''SELECT user_id, symbol, amount FROM portfolio WHERE id = ?''', (tx_id,))
+                    result = c.fetchone()
+                    conn.close()
+                    
+                    if not result:
+                        await safe_edit_message(query, f"❌ Không tìm thấy giao dịch #{tx_id}")
+                        return
+                    
+                    tx_owner_id, symbol, amount = result
+                    
+                    # Kiểm tra quyền xóa
+                    is_admin = check_permission(chat_id, current_user_id, 'delete') or \
+                               check_permission(chat_id, current_user_id, 'manage')
+                    
+                    can_delete = False
+                    if tx_owner_id == owner_id:
+                        can_delete = True
+                        logger.info(f"✅ User {current_user_id} là owner, được xóa #{tx_id}")
+                    elif is_admin:
+                        can_delete = True
+                        logger.info(f"✅ Admin {current_user_id} có quyền delete, được xóa #{tx_id}")
+                    elif current_user_id == tx_owner_id:
+                        can_delete = True
+                        logger.info(f"✅ User {current_user_id} là chủ giao dịch, được xóa #{tx_id}")
+                    
+                    if not can_delete:
+                        await safe_edit_message(query, "❌ Bạn không có quyền xóa giao dịch này!")
+                        return
+                    
+                    # Hỏi xác nhận
+                    msg = (f"⚠️ *XÁC NHẬN XÓA*\n━━━━━━━━━━━━━━━━\n\n"
+                           f"• Giao dịch: #{tx_id}\n"
+                           f"• Coin: {symbol}\n"
+                           f"• Số lượng: {amount:.4f}\n\n"
                            f"Bạn có chắc chắn muốn xóa?")
                     
-                    safe_msg = escape_markdown(msg)
-                    await safe_edit_message(query, safe_msg, reply_markup=InlineKeyboardMarkup(keyboard))
-                    return
-                
-                # Xử lý xóa giao dịch coin bình thường
-                msg = f"⚠️ *Xác nhận xóa giao dịch #{tx_id_str}?*\n\n🕐 {format_vn_time_short()}"
-                safe_msg = escape_markdown(msg)
-                keyboard = [[InlineKeyboardButton("✅ Có", callback_data=f"confirm_del_{tx_id_str}"),
-                             InlineKeyboardButton("❌ Không", callback_data="edit_transactions")]]
-                
-                await safe_edit_message(query, safe_msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                    keyboard = [[
+                        InlineKeyboardButton("✅ Có", callback_data=f"confirm_del_{tx_id}"),
+                        InlineKeyboardButton("❌ Không", callback_data=f"edit_{tx_id}")
+                    ]]
+                    
+                    await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                    
+                except Exception as e:
+                    logger.error(f"❌ Lỗi trong del_ callback: {e}", exc_info=True)
+                    await safe_edit_message(query, "❌ Có lỗi xảy ra!")
             
             elif data.startswith("confirm_del_"):
                 tx_id_str = data.replace("confirm_del_", "")
@@ -5253,48 +5411,61 @@ try:
                     await query.edit_message_text(f"❌ Có lỗi xảy ra: {str(e)[:100]}", parse_mode=None)
             
             elif data == "edit_transactions":
-                owner_id = ctx.bot_data.get('effective_user_id', query.from_user.id)
-                current_user_id = query.from_user.id
-                chat_id = query.message.chat.id
-                
-                logger.info(f"📋 edit_transactions callback: owner_id={owner_id}, current_user={current_user_id}")
-                
-                # Kiểm tra quyền admin
-                is_admin = check_permission(chat_id, current_user_id, 'edit') or \
-                           check_permission(chat_id, current_user_id, 'delete') or \
-                           check_permission(chat_id, current_user_id, 'manage')
-                
-                # Lấy danh sách giao dịch của OWNER
-                transactions = get_transaction_detail(owner_id)
-                
-                if not transactions:
-                    msg = f"📭 Không có giao dịch!\n\n🕐 {format_vn_time()}"
-                    keyboard = [[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
-                    await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
-                    return
-                
-                msg = "✏️ *CHỌN GIAO DỊCH*\n━━━━━━━━━━━━━━━━\n\n"
-                keyboard = []
-                row = []
-                
-                for tx in transactions:
-                    tx_id, symbol, amount, price, date, total = tx
-                    short_date = date.split()[0] if date else "N/A"
-                    msg += f"• #{tx_id}: {symbol} {amount:.4f} @ {fmt_price(price)} ({short_date})\n"
+                try:
+                    owner_id = ctx.bot_data.get('effective_user_id', query.from_user.id)
+                    current_user_id = query.from_user.id
+                    chat_id = query.message.chat.id
                     
-                    # Admin có thể sửa/xóa tất cả
-                    row.append(InlineKeyboardButton(f"#{tx_id}", callback_data=f"edit_{tx_id}"))
-                    if len(row) == 4:
+                    logger.info(f"📋 edit_transactions callback: owner_id={owner_id}, current_user={current_user_id}")
+                    
+                    # Kiểm tra quyền admin
+                    is_admin = check_permission(chat_id, current_user_id, 'edit') or \
+                               check_permission(chat_id, current_user_id, 'delete') or \
+                               check_permission(chat_id, current_user_id, 'manage')
+                    
+                    # Lấy danh sách giao dịch của OWNER
+                    transactions = get_transaction_detail(owner_id)
+                    
+                    if not transactions:
+                        msg = f"📭 Không có giao dịch!\n\n🕐 {format_vn_time()}"
+                        keyboard = [[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
+                        await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                        return
+                    
+                    msg = "✏️ *CHỌN GIAO DỊCH*\n━━━━━━━━━━━━━━━━\n\n"
+                    keyboard = []
+                    row = []
+                    
+                    for tx in transactions:
+                        tx_id, symbol, amount, price, date, total = tx
+                        short_date = date.split()[0] if date else "N/A"
+                        # Format số lượng và giá
+                        amount_str = f"{amount:.4f}".rstrip('0').rstrip('.') if '.' in f"{amount:.4f}" else f"{amount:.4f}"
+                        msg += f"• #{tx_id}: {symbol} {amount_str} @ {fmt_price(price)} ({short_date})\n"
+                        
+                        # Tạo nút cho mỗi giao dịch - QUAN TRỌNG: callback_data phải là string
+                        callback_data = f"edit_{tx_id}"
+                        row.append(InlineKeyboardButton(f"#{tx_id}", callback_data=callback_data))
+                        
+                        # Mỗi hàng 4 nút
+                        if len(row) == 4:
+                            keyboard.append(row)
+                            row = []
+                    
+                    # Thêm hàng cuối cùng nếu còn
+                    if row:
                         keyboard.append(row)
-                        row = []
-                
-                if row:
-                    keyboard.append(row)
-                keyboard.append([InlineKeyboardButton("🔙 Về danh mục", callback_data="show_portfolio")])
-                
-                msg += f"\n🕐 {format_vn_time_short()}"
-                
-                await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                    
+                    # Thêm nút quay lại
+                    keyboard.append([InlineKeyboardButton("🔙 Về danh mục", callback_data="show_portfolio")])
+                    
+                    msg += f"\n🕐 {format_vn_time_short()}"
+                    
+                    await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                    
+                except Exception as e:
+                    logger.error(f"❌ Lỗi trong edit_transactions: {e}", exc_info=True)
+                    await safe_edit_message(query, "❌ Có lỗi xảy ra, vui lòng thử lại sau!")
             
             elif data == "show_top10":
                 await query.edit_message_text("🔄 Đang tải...")
