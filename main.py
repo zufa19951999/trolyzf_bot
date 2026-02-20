@@ -4549,6 +4549,21 @@ try:
         data = query.data
         
         try:
+            # Lấy owner_id (chủ sở hữu dữ liệu)
+            owner_id = ctx.bot_data.get('effective_user_id', query.from_user.id)
+            current_user_id = query.from_user.id
+            chat_id = query.message.chat.id
+            
+            # Kiểm tra quyền admin
+            is_admin = check_permission(chat_id, current_user_id, 'edit') or \
+                       check_permission(chat_id, current_user_id, 'delete') or \
+                       check_permission(chat_id, current_user_id, 'manage')
+            
+            # Kiểm tra xem có phải chủ sở hữu không
+            is_owner_user = (current_user_id == owner_id)
+            
+            logger.info(f"👤 User: {current_user_id}, Owner: {owner_id}, IsAdmin: {is_admin}, IsOwner: {is_owner_user}")
+            
             # ===========================================
             # NHÓM 1: XỬ LÝ XÓA DANH MỤC (ƯU TIÊN CAO NHẤT)
             # ===========================================
@@ -4562,8 +4577,6 @@ try:
                 except ValueError:
                     await safe_edit_message(query, "❌ ID danh mục không hợp lệ!")
                     return
-                
-                owner_id = ctx.bot_data.get('effective_user_id', query.from_user.id)
                 
                 await query.edit_message_text("🔄 Đang xóa danh mục...", parse_mode=None)
                 
@@ -4608,8 +4621,6 @@ try:
                     await safe_edit_message(query, "❌ ID danh mục không hợp lệ!")
                     return
                 
-                owner_id = ctx.bot_data.get('effective_user_id', query.from_user.id)
-                
                 categories = get_expense_categories(owner_id)
                 category_name = "Không xác định"
                 for cat in categories:
@@ -4646,9 +4657,6 @@ try:
                 # Kiểm tra nếu là số (xóa coin)
                 if tx_id_str.isdigit():
                     tx_id = int(tx_id_str)
-                    owner_id = ctx.bot_data.get('effective_user_id')
-                    current_user_id = query.from_user.id
-                    chat_id = query.message.chat.id
                     
                     # Kiểm tra giao dịch
                     conn = sqlite3.connect(DB_PATH)
@@ -4663,16 +4671,11 @@ try:
                     
                     tx_owner_id, symbol, amount = result
                     
-                    # Kiểm tra quyền xóa
-                    is_admin = check_permission(chat_id, current_user_id, 'delete') or \
-                               check_permission(chat_id, current_user_id, 'manage')
-                    
+                    # Chỉ cho phép xóa nếu là chủ sở hữu hoặc admin
                     can_delete = False
                     if tx_owner_id == owner_id:
                         can_delete = True
                     elif is_admin:
-                        can_delete = True
-                    elif current_user_id == tx_owner_id:
                         can_delete = True
                     
                     if not can_delete:
@@ -4697,7 +4700,6 @@ try:
                 
                 # Nếu là cat_ (xóa danh mục) - đã xử lý ở nhóm 1
                 elif tx_id_str.startswith("cat_"):
-                    # Đã xử lý ở trên, return ở đây để tránh lỗi
                     return
                 
                 else:
@@ -4710,7 +4712,11 @@ try:
             
             if data == "edit_transactions":
                 logger.info("📋 Hiển thị danh sách sửa/xóa giao dịch")
-                owner_id = ctx.bot_data.get('effective_user_id', query.from_user.id)
+                
+                # Chỉ cho phép chủ sở hữu hoặc admin xem/sửa giao dịch
+                if not is_owner_user and not is_admin:
+                    await safe_edit_message(query, "❌ Bạn không có quyền quản lý giao dịch!")
+                    return
                 
                 transactions = get_transaction_detail(owner_id)
                 
@@ -4740,7 +4746,8 @@ try:
                 if row:
                     keyboard.append(row)
                 
-                keyboard.append([InlineKeyboardButton("🔙 Về danh mục", callback_data="show_portfolio")])
+                # Thay vì "Xem user khác", quay về menu chính
+                keyboard.append([InlineKeyboardButton("🔙 Về menu đầu tư", callback_data="back_to_invest")])
                 
                 msg += f"\n🕐 {format_vn_time_short()}"
                 
@@ -4778,126 +4785,405 @@ try:
                 await safe_edit_message(query, text, reply_markup=InlineKeyboardMarkup(keyboard))
                 return
             
+            # ===========================================
+            # NHÓM 4: XỬ LÝ XEM PORTFOLIO - CHỈ XEM CỦA CHỦ SỞ HỮU
+            # ===========================================
+            
             if data == "show_portfolio":
-                logger.info("👥 Hiển thị danh sách user xem portfolio")
-                current_user_id = query.from_user.id
-                chat_id = query.message.chat.id
+                logger.info("📊 Hiển thị portfolio của chủ sở hữu")
                 
-                conn = sqlite3.connect(DB_PATH)
-                c = conn.cursor()
-                c.execute('''SELECT DISTINCT user_id, username, first_name FROM users WHERE user_id IN (SELECT DISTINCT user_id FROM portfolio) ORDER BY last_seen DESC LIMIT 10''')
-                users_with_portfolio = c.fetchall()
-                conn.close()
+                # Chỉ cho phép chủ sở hữu hoặc admin xem portfolio
+                if not is_owner_user and not is_admin:
+                    await safe_edit_message(query, "❌ Bạn không có quyền xem portfolio!")
+                    return
                 
-                if not users_with_portfolio:
-                    msg = f"📭 Chưa có ai có danh mục đầu tư!\n\n🕐 {format_vn_time()}"
+                portfolio_data = get_portfolio(owner_id)
+                
+                if not portfolio_data:
+                    msg = f"📭 Danh mục trống!\n\n🕐 {format_vn_time()}"
                     keyboard = [[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
                     await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
                     return
                 
-                msg = "👥 *CHỌN USER XEM DANH MỤC*\n━━━━━━━━━━━━━━━━\n\n"
-                keyboard = []
-                row = []
+                symbols = list(set([row[0] for row in portfolio_data]))
+                prices = get_prices_batch(symbols)
                 
-                for i, (uid, username, first_name) in enumerate(users_with_portfolio, 1):
-                    display = f"@{username}" if username else first_name or f"User {uid}"
-                    safe_display = escape_markdown(display)
-                    msg += f"{i}. {safe_display}\n"
-                    
-                    row.append(InlineKeyboardButton(f"{i}", callback_data=f"view_portfolio_{uid}"))
-                    if len(row) == 5:
-                        keyboard.append(row)
-                        row = []
+                summary = {}
+                total_invest = 0
+                total_value = 0
                 
-                if row:
-                    keyboard.append(row)
+                for row in portfolio_data:
+                    symbol, amount, price, date, cost = row
+                    if symbol not in summary:
+                        summary[symbol] = {'amount': 0, 'cost': 0}
+                    summary[symbol]['amount'] += amount
+                    summary[symbol]['cost'] += cost
+                    total_invest += cost
                 
-                keyboard.append([InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")])
+                # Lấy tên hiển thị
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                c.execute("SELECT username, first_name FROM users WHERE user_id = ?", (owner_id,))
+                user_info = c.fetchone()
+                conn.close()
                 
-                msg += f"\n🕐 {format_vn_time_short()}"
+                display_name = user_info[0] if user_info and user_info[0] else (user_info[1] if user_info else f"User {owner_id}")
+                safe_display_name = escape_markdown(display_name)
+                
+                msg = f"📊 *DANH MỤC ĐẦU TƯ*\n━━━━━━━━━━━━━━━━\n\n"
+                
+                for symbol, data in summary.items():
+                    price_data = prices.get(symbol)
+                    if price_data:
+                        current = data['amount'] * price_data['p']
+                        profit = current - data['cost']
+                        profit_percent = (profit / data['cost']) * 100 if data['cost'] > 0 else 0
+                        total_value += current
+                        
+                        msg += f"*{symbol}*\n"
+                        msg += f"📊 SL: `{data['amount']:.4f}`\n"
+                        msg += f"💰 TB: `{fmt_price(data['cost']/data['amount'])}`\n"
+                        msg += f"💎 TT: `{fmt_price(current)}`\n"
+                        msg += f"{'✅' if profit>=0 else '❌'} LN: `{fmt_price(profit)}` ({profit_percent:+.2f}%)\n\n"
+                
+                total_profit = total_value - total_invest
+                total_profit_percent = (total_profit / total_invest) * 100 if total_invest > 0 else 0
+                
+                msg += "━━━━━━━━━━━━━━━━\n"
+                msg += f"💵 Vốn: `{fmt_price(total_invest)}`\n"
+                msg += f"💰 GT: `{fmt_price(total_value)}`\n"
+                msg += f"{'✅' if total_profit>=0 else '❌'} Tổng LN: `{fmt_price(total_profit)}` ({total_profit_percent:+.2f}%)\n\n"
+                msg += f"🕐 {format_vn_time()}"
+                
+                keyboard = [[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
                 
                 await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
                 return
+            
+            # ===========================================
+            # NHÓM 5: XỬ LÝ XEM LỢI NHUẬN - CHỈ XEM CỦA CHỦ SỞ HỮU
+            # ===========================================
             
             if data == "show_profit":
-                logger.info("📈 Hiển thị danh sách user xem lợi nhuận")
-                current_user_id = query.from_user.id
-                chat_id = query.message.chat.id
+                logger.info("📈 Hiển thị lợi nhuận của chủ sở hữu")
                 
-                conn = sqlite3.connect(DB_PATH)
-                c = conn.cursor()
-                c.execute('''SELECT DISTINCT user_id, username, first_name FROM users WHERE user_id IN (SELECT DISTINCT user_id FROM portfolio) ORDER BY last_seen DESC LIMIT 10''')
-                users_with_portfolio = c.fetchall()
-                conn.close()
+                # Chỉ cho phép chủ sở hữu hoặc admin xem lợi nhuận
+                if not is_owner_user and not is_admin:
+                    await safe_edit_message(query, "❌ Bạn không có quyền xem lợi nhuận!")
+                    return
                 
-                if not users_with_portfolio:
-                    msg = f"📭 Chưa có ai có danh mục đầu tư!\n\n🕐 {format_vn_time()}"
+                transactions = get_transaction_detail(owner_id)
+                
+                if not transactions:
+                    msg = f"📭 Danh mục trống!\n\n🕐 {format_vn_time()}"
                     keyboard = [[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
                     await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
                     return
                 
-                msg = "📈 *CHỌN USER XEM LỢI NHUẬN*\n━━━━━━━━━━━━━━━━\n\n"
-                keyboard = []
-                row = []
+                # Lấy tên hiển thị
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                c.execute("SELECT username, first_name FROM users WHERE user_id = ?", (owner_id,))
+                user_info = c.fetchone()
+                conn.close()
                 
-                for i, (uid, username, first_name) in enumerate(users_with_portfolio, 1):
-                    display = f"@{username}" if username else first_name or f"User {uid}"
-                    safe_display = escape_markdown(display)
-                    msg += f"{i}. {safe_display}\n"
-                    row.append(InlineKeyboardButton(f"{i}", callback_data=f"view_profit_{uid}"))
-                    if len(row) == 5:
-                        keyboard.append(row)
-                        row = []
+                display_name = user_info[0] if user_info and user_info[0] else (user_info[1] if user_info else f"User {owner_id}")
+                safe_display_name = escape_markdown(display_name)
                 
-                if row:
-                    keyboard.append(row)
+                msg = f"📈 *CHI TIẾT LỢI NHUẬN*\n━━━━━━━━━━━━━━━━\n\n"
+                total_invest = 0
+                total_value = 0
                 
-                keyboard.append([InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")])
+                for tx in transactions:
+                    tx_id, symbol, amount, price, date, cost = tx
+                    price_data = get_price(symbol)
+                    
+                    if price_data:
+                        current = amount * price_data['p']
+                        profit = current - cost
+                        profit_percent = (profit / cost) * 100 if cost > 0 else 0
+                        
+                        total_invest += cost
+                        total_value += current
+                        
+                        short_date = date.split()[0]
+                        msg += f"*#{tx_id}: {symbol}*\n"
+                        msg += f"📅 {short_date}\n"
+                        msg += f"📊 SL: `{amount:.4f}`\n"
+                        msg += f"💰 Mua: `{fmt_price(price)}`\n"
+                        msg += f"💎 TT: `{fmt_price(current)}`\n"
+                        msg += f"{'✅' if profit>=0 else '❌'} LN: `{fmt_price(profit)}` ({profit_percent:+.2f}%)\n\n"
                 
-                msg += f"\n🕐 {format_vn_time_short()}"
+                total_profit = total_value - total_invest
+                total_profit_percent = (total_profit / total_invest) * 100 if total_invest > 0 else 0
+                
+                msg += "━━━━━━━━━━━━━━━━\n"
+                msg += f"💵 Vốn: `{fmt_price(total_invest)}`\n"
+                msg += f"💰 GT: `{fmt_price(total_value)}`\n"
+                msg += f"{'✅' if total_profit>=0 else '❌'} Tổng LN: `{fmt_price(total_profit)}` ({total_profit_percent:+.2f}%)\n\n"
+                msg += f"🕐 {format_vn_time()}"
+                
+                keyboard = [[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
                 
                 await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
                 return
             
+            # ===========================================
+            # NHÓM 6: XỬ LÝ XEM THỐNG KÊ - CHỈ XEM CỦA CHỦ SỞ HỮU
+            # ===========================================
+            
             if data == "show_stats":
-                logger.info("📊 Hiển thị danh sách user xem thống kê")
-                current_user_id = query.from_user.id
-                chat_id = query.message.chat.id
+                logger.info("📊 Hiển thị thống kê của chủ sở hữu")
                 
-                conn = sqlite3.connect(DB_PATH)
-                c = conn.cursor()
-                c.execute('''SELECT DISTINCT user_id, username, first_name FROM users WHERE user_id IN (SELECT DISTINCT user_id FROM portfolio) ORDER BY last_seen DESC LIMIT 10''')
-                users_with_portfolio = c.fetchall()
-                conn.close()
+                # Chỉ cho phép chủ sở hữu hoặc admin xem thống kê
+                if not is_owner_user and not is_admin:
+                    await safe_edit_message(query, "❌ Bạn không có quyền xem thống kê!")
+                    return
                 
-                if not users_with_portfolio:
-                    msg = f"📭 Chưa có ai có danh mục đầu tư!\n\n🕐 {format_vn_time()}"
+                await query.edit_message_text("🔄 Đang tính toán thống kê...")
+                
+                stats = get_portfolio_stats(owner_id)
+                
+                if not stats:
+                    msg = f"📭 Danh mục trống!"
                     keyboard = [[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
                     await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
                     return
                 
-                msg = "📊 *CHỌN USER XEM THỐNG KÊ*\n━━━━━━━━━━━━━━━━\n\n"
-                keyboard = []
-                row = []
+                # Lấy tên hiển thị
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                c.execute("SELECT username, first_name FROM users WHERE user_id = ?", (owner_id,))
+                user_info = c.fetchone()
+                conn.close()
                 
-                for i, (uid, username, first_name) in enumerate(users_with_portfolio, 1):
-                    display = f"@{username}" if username else first_name or f"User {uid}"
-                    safe_display = escape_markdown(display)
-                    msg += f"{i}. {safe_display}\n"
-                    row.append(InlineKeyboardButton(f"{i}", callback_data=f"view_stats_{uid}"))
-                    if len(row) == 5:
-                        keyboard.append(row)
-                        row = []
+                display_name = user_info[0] if user_info and user_info[0] else (user_info[1] if user_info else f"User {owner_id}")
+                safe_display_name = escape_markdown(display_name)
                 
-                if row:
-                    keyboard.append(row)
+                msg = (f"📊 *THỐNG KÊ DANH MỤC*\n━━━━━━━━━━━━━━━━\n\n"
+                       f"*TỔNG QUAN*\n"
+                       f"• Vốn: `{fmt_price(stats['total_invest'])}`\n"
+                       f"• Giá trị: `{fmt_price(stats['total_value'])}`\n"
+                       f"• Lợi nhuận: `{fmt_price(stats['total_profit'])}`\n"
+                       f"• Tỷ suất: `{stats['total_profit_percent']:+.2f}%`\n\n"
+                       f"*📈 TOP COIN LỜI NHẤT*\n")
                 
-                keyboard.append([InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")])
+                count = 0
+                for symbol, profit, profit_pct, value, cost in stats['coin_profits']:
+                    if profit > 0:
+                        count += 1
+                        msg += f"{count}. *{symbol}*: `{fmt_price(profit)}` ({profit_pct:+.2f}%)\n"
+                    if count >= 3:
+                        break
                 
-                msg += f"\n🕐 {format_vn_time_short()}"
+                if count == 0:
+                    msg += "Không có coin lời\n"
+                
+                msg += f"\n*📉 TOP COIN LỖ NHẤT*\n"
+                count = 0
+                for symbol, profit, profit_pct, value, cost in reversed(stats['coin_profits']):
+                    if profit < 0:
+                        count += 1
+                        msg += f"{count}. *{symbol}*: `{fmt_price(profit)}` ({profit_pct:+.2f}%)\n"
+                    if count >= 3:
+                        break
+                
+                if count == 0:
+                    msg += "Không có coin lỗ\n"
+                
+                msg += f"\n🕐 {format_vn_time()}"
+                
+                keyboard = [[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
                 
                 await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
                 return
+            
+            # ===========================================
+            # NHÓM 7: XỬ LÝ XEM GIÁ COIN
+            # ===========================================
+            
+            if data.startswith("price_"):
+                symbol = data.replace("price_", "")
+                d = get_price(symbol)
+                
+                if d:
+                    if symbol == 'USDT':
+                        rate_data = get_usdt_vnd_rate()
+                        msg = f"*{d['n']}* #{d['r']}\n💰 USD: `{fmt_price(d['p'])}`\n🇻🇳 VND: `{fmt_vnd(rate_data['vnd'])}`\n📦 Volume: `{fmt_vol(d['v'])}`\n💎 Market Cap: `{fmt_vol(d['m'])}`\n📈 24h: {fmt_percent(d['c'])}"
+                    else:
+                        msg = f"*{d['n']}* #{d['r']}\n💰 Giá: `{fmt_price(d['p'])}`\n📦 Volume: `{fmt_vol(d['v'])}`\n💎 Market Cap: `{fmt_vol(d['m'])}`\n📈 24h: {fmt_percent(d['c'])}"
+                    msg += f"\n\n🕐 {format_vn_time_short()}"
+                else:
+                    msg = f"❌ *{symbol}*: Không có dữ liệu\n\n🕐 {format_vn_time_short()}"
+                
+                keyboard = [[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
+                await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                return
+            
+            # ===========================================
+            # NHÓM 8: XỬ LÝ SỬA GIAO DỊCH
+            # ===========================================
+            
+            if data.startswith("edit_"):
+                logger.info(f"✏️ Sửa giao dịch: {data}")
+                
+                # QUAN TRỌNG: Kiểm tra nếu là "edit_transactions" thì đã xử lý ở trên
+                if data == "edit_transactions":
+                    return
+                
+                tx_id_str = data.replace("edit_", "")
+                
+                if not tx_id_str.isdigit():
+                    logger.error(f"❌ edit_ callback với ID không hợp lệ: {tx_id_str}")
+                    await safe_edit_message(query, "❌ ID không hợp lệ!")
+                    return
+                
+                tx_id = int(tx_id_str)
+                
+                # Lấy chi tiết giao dịch
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                c.execute('''SELECT id, symbol, amount, buy_price, buy_date, total_cost, user_id 
+                            FROM portfolio WHERE id = ?''', (tx_id,))
+                tx = c.fetchone()
+                conn.close()
+                
+                if not tx:
+                    await safe_edit_message(query, f"❌ Không tìm thấy giao dịch #{tx_id}")
+                    return
+                
+                tx_id, symbol, amount, price, date, total, tx_owner_id = tx
+                
+                # Kiểm tra quyền xem/sửa - chỉ cho phép chủ sở hữu hoặc admin
+                if tx_owner_id != owner_id and not is_admin:
+                    await safe_edit_message(query, "❌ Bạn không có quyền xem giao dịch này!")
+                    return
+                
+                # Lấy giá hiện tại
+                price_data = get_price(symbol)
+                current_price = price_data['p'] if price_data else 0
+                profit = (current_price - price) * amount if current_price else 0
+                profit_percent = ((current_price - price) / price) * 100 if price and current_price else 0
+                
+                # Tạo message
+                msg = (f"📝 *GIAO DỊCH #{tx_id}*\n━━━━━━━━━━━━━━━━\n\n"
+                       f"*{symbol}*\n"
+                       f"📅 Ngày mua: {date}\n"
+                       f"📊 Số lượng: `{amount:.4f}`\n"
+                       f"💰 Giá mua: `{fmt_price(price)}`\n"
+                       f"💵 Tổng vốn: `{fmt_price(total)}`\n"
+                       f"📈 Giá hiện tại: `{fmt_price(current_price)}`\n"
+                       f"{'✅' if profit>=0 else '❌'} Lợi nhuận: `{fmt_price(profit)}` ({profit_percent:+.2f}%)\n\n")
+                
+                # Thêm nút sửa/xóa nếu có quyền
+                keyboard = []
+                if tx_owner_id == owner_id or is_admin:
+                    keyboard.append([
+                        InlineKeyboardButton("✏️ Sửa", callback_data=f"edit_form_{tx_id}"),
+                        InlineKeyboardButton("🗑 Xóa", callback_data=f"del_{tx_id}")
+                    ])
+                
+                keyboard.append([InlineKeyboardButton("🔙 Về danh sách", callback_data="edit_transactions")])
+                
+                msg += f"🕐 {format_vn_time()}"
+                
+                await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                return
+            
+            if data.startswith("edit_form_"):
+                logger.info(f"📝 Form sửa giao dịch: {data}")
+                tx_id_str = data.replace("edit_form_", "")
+                
+                if not tx_id_str.isdigit():
+                    await safe_edit_message(query, "❌ ID không hợp lệ!")
+                    return
+                
+                tx_id = int(tx_id_str)
+                
+                # Lấy thông tin giao dịch
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                c.execute('''SELECT symbol, amount, buy_price FROM portfolio WHERE id = ?''', (tx_id,))
+                tx = c.fetchone()
+                conn.close()
+                
+                if not tx:
+                    await safe_edit_message(query, f"❌ Không tìm thấy giao dịch #{tx_id}")
+                    return
+                
+                symbol, current_amount, current_price = tx
+                
+                msg = (f"✏️ *SỬA GIAO DỊCH #{tx_id}*\n━━━━━━━━━━━━━━━━\n\n"
+                       f"*{symbol}*\n"
+                       f"📊 SL hiện tại: `{current_amount:.4f}`\n"
+                       f"💰 Giá hiện tại: `{fmt_price(current_price)}`\n\n"
+                       f"*Nhập lệnh:*\n"
+                       f"`/edit {tx_id} [số lượng mới] [giá mới]`\n\n"
+                       f"*Ví dụ:*\n"
+                       f"`/edit {tx_id} 0.5 45000`\n\n"
+                       f"🕐 {format_vn_time_short()}")
+                
+                keyboard = [[InlineKeyboardButton("🔙 Quay lại", callback_data=f"edit_{tx_id}")]]
+                
+                await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                return
+            
+            if data.startswith("del_"):
+                logger.info(f"🗑 Xóa giao dịch: {data}")
+                tx_id_str = data.replace("del_", "")
+                
+                # Kiểm tra nếu là xóa danh mục (cat_) - đã xử lý ở nhóm 1
+                if tx_id_str.startswith("cat_"):
+                    return
+                
+                if not tx_id_str.isdigit():
+                    await safe_edit_message(query, "❌ ID không hợp lệ!")
+                    return
+                
+                tx_id = int(tx_id_str)
+                
+                # Kiểm tra giao dịch có tồn tại không
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                c.execute('''SELECT user_id, symbol, amount FROM portfolio WHERE id = ?''', (tx_id,))
+                result = c.fetchone()
+                conn.close()
+                
+                if not result:
+                    await safe_edit_message(query, f"❌ Không tìm thấy giao dịch #{tx_id}")
+                    return
+                
+                tx_owner_id, symbol, amount = result
+                
+                # Kiểm tra quyền xóa - chỉ cho phép chủ sở hữu hoặc admin
+                can_delete = False
+                if tx_owner_id == owner_id:
+                    can_delete = True
+                elif is_admin:
+                    can_delete = True
+                
+                if not can_delete:
+                    await safe_edit_message(query, "❌ Bạn không có quyền xóa giao dịch này!")
+                    return
+                
+                # Hỏi xác nhận
+                msg = (f"⚠️ *XÁC NHẬN XÓA*\n━━━━━━━━━━━━━━━━\n\n"
+                       f"• Giao dịch: #{tx_id}\n"
+                       f"• Coin: {symbol}\n"
+                       f"• Số lượng: {amount:.4f}\n\n"
+                       f"Bạn có chắc chắn muốn xóa?")
+                
+                keyboard = [[
+                    InlineKeyboardButton("✅ Có", callback_data=f"confirm_del_{tx_id}"),
+                    InlineKeyboardButton("❌ Không", callback_data=f"edit_{tx_id}")
+                ]]
+                
+                await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                return
+            
+            # ===========================================
+            # NHÓM 9: XỬ LÝ MENU CHI TIÊU
+            # ===========================================
             
             if data == "show_alerts":
                 uid = query.from_user.id
@@ -4980,433 +5266,11 @@ try:
                        "• `/perm grant @user delete` - Cấp quyền xóa\n"
                        "• `/perm grant @user manage` - Cấp quyền QL\n"
                        "• `/perm revoke @user` - Thu hồi quyền\n\n"
-                       "• `/view @user` - Xem portfolio người khác\n"
-                       "• `/users` - Xem danh sách thành viên\n\n"
                        f"🕐 {format_vn_time()}")
                 
                 keyboard = [[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
                 await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
                 return
-            
-            # ===========================================
-            # NHÓM 4: XỬ LÝ XEM GIÁ COIN
-            # ===========================================
-            
-            if data.startswith("price_"):
-                symbol = data.replace("price_", "")
-                d = get_price(symbol)
-                
-                if d:
-                    if symbol == 'USDT':
-                        rate_data = get_usdt_vnd_rate()
-                        msg = f"*{d['n']}* #{d['r']}\n💰 USD: `{fmt_price(d['p'])}`\n🇻🇳 VND: `{fmt_vnd(rate_data['vnd'])}`\n📦 Volume: `{fmt_vol(d['v'])}`\n💎 Market Cap: `{fmt_vol(d['m'])}`\n📈 24h: {fmt_percent(d['c'])}"
-                    else:
-                        msg = f"*{d['n']}* #{d['r']}\n💰 Giá: `{fmt_price(d['p'])}`\n📦 Volume: `{fmt_vol(d['v'])}`\n💎 Market Cap: `{fmt_vol(d['m'])}`\n📈 24h: {fmt_percent(d['c'])}"
-                    msg += f"\n\n🕐 {format_vn_time_short()}"
-                else:
-                    msg = f"❌ *{symbol}*: Không có dữ liệu\n\n🕐 {format_vn_time_short()}"
-                
-                keyboard = [[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
-                await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
-                return
-            
-            # ===========================================
-            # NHÓM 5: XỬ LÝ XEM PORTFOLIO/LỢI NHUẬN/THỐNG KÊ USER KHÁC
-            # ===========================================
-            
-            if data.startswith("view_portfolio_"):
-                target_user_id = int(data.replace("view_portfolio_", ""))
-                current_user_id = query.from_user.id
-                chat_id = query.message.chat.id
-                
-                if current_user_id != target_user_id:
-                    if not check_permission(chat_id, current_user_id, 'view'):
-                        msg = "❌ Bạn không có quyền xem dữ liệu của người khác!"
-                        keyboard = [[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
-                        await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
-                        return
-                
-                conn = sqlite3.connect(DB_PATH)
-                c = conn.cursor()
-                c.execute("SELECT username, first_name FROM users WHERE user_id = ?", (target_user_id,))
-                user_info = c.fetchone()
-                conn.close()
-                
-                display_name = user_info[0] if user_info and user_info[0] else (user_info[1] if user_info else f"User {target_user_id}")
-                safe_display_name = escape_markdown(display_name)
-                
-                portfolio_data = get_portfolio(target_user_id)
-                
-                if not portfolio_data:
-                    msg = f"📭 Danh mục của {safe_display_name} trống!\n\n🕐 {format_vn_time()}"
-                    keyboard = [[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
-                    await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
-                    return
-                
-                symbols = list(set([row[0] for row in portfolio_data]))
-                prices = get_prices_batch(symbols)
-                
-                summary = {}
-                total_invest = 0
-                total_value = 0
-                
-                for row in portfolio_data:
-                    symbol, amount, price, date, cost = row
-                    if symbol not in summary:
-                        summary[symbol] = {'amount': 0, 'cost': 0}
-                    summary[symbol]['amount'] += amount
-                    summary[symbol]['cost'] += cost
-                    total_invest += cost
-                
-                msg = f"📊 *DANH MỤC CỦA {safe_display_name}*\n━━━━━━━━━━━━━━━━\n\n"
-                
-                for symbol, data in summary.items():
-                    price_data = prices.get(symbol)
-                    if price_data:
-                        current = data['amount'] * price_data['p']
-                        profit = current - data['cost']
-                        profit_percent = (profit / data['cost']) * 100 if data['cost'] > 0 else 0
-                        total_value += current
-                        
-                        msg += f"*{symbol}*\n"
-                        msg += f"📊 SL: `{data['amount']:.4f}`\n"
-                        msg += f"💰 TB: `{fmt_price(data['cost']/data['amount'])}`\n"
-                        msg += f"💎 TT: `{fmt_price(current)}`\n"
-                        msg += f"{'✅' if profit>=0 else '❌'} LN: `{fmt_price(profit)}` ({profit_percent:+.2f}%)\n\n"
-                
-                total_profit = total_value - total_invest
-                total_profit_percent = (total_profit / total_invest) * 100 if total_invest > 0 else 0
-                
-                msg += "━━━━━━━━━━━━━━━━\n"
-                msg += f"💵 Vốn: `{fmt_price(total_invest)}`\n"
-                msg += f"💰 GT: `{fmt_price(total_value)}`\n"
-                msg += f"{'✅' if total_profit>=0 else '❌'} Tổng LN: `{fmt_price(total_profit)}` ({total_profit_percent:+.2f}%)\n\n"
-                msg += f"🕐 {format_vn_time()}"
-                
-                keyboard = [[InlineKeyboardButton("👥 Xem user khác", callback_data="show_portfolio"),
-                             InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
-                
-                await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
-                return
-            
-            if data.startswith("view_profit_"):
-                target_user_id = int(data.replace("view_profit_", ""))
-                current_user_id = query.from_user.id
-                chat_id = query.message.chat.id
-                
-                if current_user_id != target_user_id:
-                    if not check_permission(chat_id, current_user_id, 'view'):
-                        msg = "❌ Bạn không có quyền xem dữ liệu của người khác!"
-                        keyboard = [[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
-                        await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
-                        return
-                
-                conn = sqlite3.connect(DB_PATH)
-                c = conn.cursor()
-                c.execute("SELECT username, first_name FROM users WHERE user_id = ?", (target_user_id,))
-                user_info = c.fetchone()
-                conn.close()
-                
-                display_name = user_info[0] if user_info and user_info[0] else (user_info[1] if user_info else f"User {target_user_id}")
-                safe_display_name = escape_markdown(display_name)
-                
-                transactions = get_transaction_detail(target_user_id)
-                
-                if not transactions:
-                    msg = f"📭 Danh mục của {safe_display_name} trống!\n\n🕐 {format_vn_time()}"
-                    keyboard = [[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
-                    await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
-                    return
-                
-                msg = f"📈 *CHI TIẾT LỢI NHUẬN - {safe_display_name}*\n━━━━━━━━━━━━━━━━\n\n"
-                total_invest = 0
-                total_value = 0
-                
-                for tx in transactions:
-                    tx_id, symbol, amount, price, date, cost = tx
-                    price_data = get_price(symbol)
-                    
-                    if price_data:
-                        current = amount * price_data['p']
-                        profit = current - cost
-                        profit_percent = (profit / cost) * 100 if cost > 0 else 0
-                        
-                        total_invest += cost
-                        total_value += current
-                        
-                        short_date = date.split()[0]
-                        msg += f"*#{tx_id}: {symbol}*\n"
-                        msg += f"📅 {short_date}\n"
-                        msg += f"📊 SL: `{amount:.4f}`\n"
-                        msg += f"💰 Mua: `{fmt_price(price)}`\n"
-                        msg += f"💎 TT: `{fmt_price(current)}`\n"
-                        msg += f"{'✅' if profit>=0 else '❌'} LN: `{fmt_price(profit)}` ({profit_percent:+.2f}%)\n\n"
-                
-                total_profit = total_value - total_invest
-                total_profit_percent = (total_profit / total_invest) * 100 if total_invest > 0 else 0
-                
-                msg += "━━━━━━━━━━━━━━━━\n"
-                msg += f"💵 Vốn: `{fmt_price(total_invest)}`\n"
-                msg += f"💰 GT: `{fmt_price(total_value)}`\n"
-                msg += f"{'✅' if total_profit>=0 else '❌'} Tổng LN: `{fmt_price(total_profit)}` ({total_profit_percent:+.2f}%)\n\n"
-                msg += f"🕐 {format_vn_time()}"
-                
-                keyboard = [[InlineKeyboardButton("👥 Xem user khác", callback_data="show_profit"),
-                             InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
-                
-                await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
-                return
-            
-            if data.startswith("view_stats_"):
-                target_user_id = int(data.replace("view_stats_", ""))
-                current_user_id = query.from_user.id
-                chat_id = query.message.chat.id
-                
-                if current_user_id != target_user_id:
-                    if not check_permission(chat_id, current_user_id, 'view'):
-                        msg = "❌ Bạn không có quyền xem dữ liệu của người khác!"
-                        keyboard = [[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
-                        await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
-                        return
-                
-                conn = sqlite3.connect(DB_PATH)
-                c = conn.cursor()
-                c.execute("SELECT username, first_name FROM users WHERE user_id = ?", (target_user_id,))
-                user_info = c.fetchone()
-                conn.close()
-                
-                display_name = user_info[0] if user_info and user_info[0] else (user_info[1] if user_info else f"User {target_user_id}")
-                safe_display_name = escape_markdown(display_name)
-                
-                await query.edit_message_text("🔄 Đang tính toán thống kê...")
-                
-                stats = get_portfolio_stats(target_user_id)
-                
-                if not stats:
-                    msg = f"📭 Danh mục của {safe_display_name} trống!"
-                    keyboard = [[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
-                    await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
-                    return
-                
-                msg = (f"📊 *THỐNG KÊ - {safe_display_name}*\n━━━━━━━━━━━━━━━━\n\n"
-                       f"*TỔNG QUAN*\n"
-                       f"• Vốn: `{fmt_price(stats['total_invest'])}`\n"
-                       f"• Giá trị: `{fmt_price(stats['total_value'])}`\n"
-                       f"• Lợi nhuận: `{fmt_price(stats['total_profit'])}`\n"
-                       f"• Tỷ suất: `{stats['total_profit_percent']:+.2f}%`\n\n"
-                       f"*📈 TOP COIN LỜI NHẤT*\n")
-                
-                count = 0
-                for symbol, profit, profit_pct, value, cost in stats['coin_profits']:
-                    if profit > 0:
-                        count += 1
-                        msg += f"{count}. *{symbol}*: `{fmt_price(profit)}` ({profit_pct:+.2f}%)\n"
-                    if count >= 3:
-                        break
-                
-                if count == 0:
-                    msg += "Không có coin lời\n"
-                
-                msg += f"\n*📉 TOP COIN LỖ NHẤT*\n"
-                count = 0
-                for symbol, profit, profit_pct, value, cost in reversed(stats['coin_profits']):
-                    if profit < 0:
-                        count += 1
-                        msg += f"{count}. *{symbol}*: `{fmt_price(profit)}` ({profit_pct:+.2f}%)\n"
-                    if count >= 3:
-                        break
-                
-                if count == 0:
-                    msg += "Không có coin lỗ\n"
-                
-                msg += f"\n🕐 {format_vn_time()}"
-                
-                keyboard = [[InlineKeyboardButton("👥 Xem user khác", callback_data="show_stats"),
-                             InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
-                
-                await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
-                return
-            
-            # ===========================================
-            # NHÓM 6: XỬ LÝ SỬA GIAO DỊCH
-            # ===========================================
-            
-            if data.startswith("edit_"):
-                logger.info(f"✏️ Sửa giao dịch: {data}")
-                
-                # QUAN TRỌNG: Kiểm tra nếu là "edit_transactions" thì đã xử lý ở trên
-                if data == "edit_transactions":
-                    return
-                
-                tx_id_str = data.replace("edit_", "")
-                
-                if not tx_id_str.isdigit():
-                    logger.error(f"❌ edit_ callback với ID không hợp lệ: {tx_id_str}")
-                    await safe_edit_message(query, "❌ ID không hợp lệ!")
-                    return
-                
-                tx_id = int(tx_id_str)
-                owner_id = ctx.bot_data.get('effective_user_id', query.from_user.id)
-                current_user_id = query.from_user.id
-                chat_id = query.message.chat.id
-                
-                # Lấy chi tiết giao dịch
-                conn = sqlite3.connect(DB_PATH)
-                c = conn.cursor()
-                c.execute('''SELECT id, symbol, amount, buy_price, buy_date, total_cost, user_id 
-                            FROM portfolio WHERE id = ?''', (tx_id,))
-                tx = c.fetchone()
-                conn.close()
-                
-                if not tx:
-                    await safe_edit_message(query, f"❌ Không tìm thấy giao dịch #{tx_id}")
-                    return
-                
-                tx_id, symbol, amount, price, date, total, tx_owner_id = tx
-                
-                # Kiểm tra quyền admin
-                is_admin = check_permission(chat_id, current_user_id, 'edit') or \
-                           check_permission(chat_id, current_user_id, 'delete') or \
-                           check_permission(chat_id, current_user_id, 'manage')
-                
-                # Kiểm tra quyền xem/sửa
-                if tx_owner_id != owner_id and not is_admin and current_user_id != owner_id:
-                    await safe_edit_message(query, "❌ Bạn không có quyền xem giao dịch này!")
-                    return
-                
-                # Lấy giá hiện tại
-                price_data = get_price(symbol)
-                current_price = price_data['p'] if price_data else 0
-                profit = (current_price - price) * amount if current_price else 0
-                profit_percent = ((current_price - price) / price) * 100 if price and current_price else 0
-                
-                # Tạo message
-                msg = (f"📝 *GIAO DỊCH #{tx_id}*\n━━━━━━━━━━━━━━━━\n\n"
-                       f"*{symbol}*\n"
-                       f"📅 Ngày mua: {date}\n"
-                       f"📊 Số lượng: `{amount:.4f}`\n"
-                       f"💰 Giá mua: `{fmt_price(price)}`\n"
-                       f"💵 Tổng vốn: `{fmt_price(total)}`\n"
-                       f"📈 Giá hiện tại: `{fmt_price(current_price)}`\n"
-                       f"{'✅' if profit>=0 else '❌'} Lợi nhuận: `{fmt_price(profit)}` ({profit_percent:+.2f}%)\n\n")
-                
-                # Thêm nút sửa/xóa nếu có quyền
-                keyboard = []
-                if tx_owner_id == owner_id or is_admin or current_user_id == owner_id:
-                    keyboard.append([
-                        InlineKeyboardButton("✏️ Sửa", callback_data=f"edit_form_{tx_id}"),
-                        InlineKeyboardButton("🗑 Xóa", callback_data=f"del_{tx_id}")
-                    ])
-                
-                keyboard.append([InlineKeyboardButton("🔙 Về danh sách", callback_data="edit_transactions")])
-                
-                msg += f"🕐 {format_vn_time()}"
-                
-                await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
-                return
-            
-            if data.startswith("edit_form_"):
-                logger.info(f"📝 Form sửa giao dịch: {data}")
-                tx_id_str = data.replace("edit_form_", "")
-                
-                if not tx_id_str.isdigit():
-                    await safe_edit_message(query, "❌ ID không hợp lệ!")
-                    return
-                
-                tx_id = int(tx_id_str)
-                
-                # Lấy thông tin giao dịch
-                conn = sqlite3.connect(DB_PATH)
-                c = conn.cursor()
-                c.execute('''SELECT symbol, amount, buy_price FROM portfolio WHERE id = ?''', (tx_id,))
-                tx = c.fetchone()
-                conn.close()
-                
-                if not tx:
-                    await safe_edit_message(query, f"❌ Không tìm thấy giao dịch #{tx_id}")
-                    return
-                
-                symbol, current_amount, current_price = tx
-                
-                msg = (f"✏️ *SỬA GIAO DỊCH #{tx_id}*\n━━━━━━━━━━━━━━━━\n\n"
-                       f"*{symbol}*\n"
-                       f"📊 SL hiện tại: `{current_amount:.4f}`\n"
-                       f"💰 Giá hiện tại: `{fmt_price(current_price)}`\n\n"
-                       f"*Nhập lệnh:*\n"
-                       f"`/edit {tx_id} [số lượng mới] [giá mới]`\n\n"
-                       f"*Ví dụ:*\n"
-                       f"`/edit {tx_id} 0.5 45000`\n\n"
-                       f"🕐 {format_vn_time_short()}")
-                
-                keyboard = [[InlineKeyboardButton("🔙 Quay lại", callback_data=f"edit_{tx_id}")]]
-                
-                await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
-                return
-            
-            if data.startswith("del_"):
-                logger.info(f"🗑 Xóa giao dịch: {data}")
-                tx_id_str = data.replace("del_", "")
-                
-                # Kiểm tra nếu là xóa danh mục (cat_) - đã xử lý ở nhóm 1
-                if tx_id_str.startswith("cat_"):
-                    return
-                
-                if not tx_id_str.isdigit():
-                    await safe_edit_message(query, "❌ ID không hợp lệ!")
-                    return
-                
-                tx_id = int(tx_id_str)
-                owner_id = ctx.bot_data.get('effective_user_id', query.from_user.id)
-                current_user_id = query.from_user.id
-                chat_id = query.message.chat.id
-                
-                # Kiểm tra giao dịch có tồn tại không
-                conn = sqlite3.connect(DB_PATH)
-                c = conn.cursor()
-                c.execute('''SELECT user_id, symbol, amount FROM portfolio WHERE id = ?''', (tx_id,))
-                result = c.fetchone()
-                conn.close()
-                
-                if not result:
-                    await safe_edit_message(query, f"❌ Không tìm thấy giao dịch #{tx_id}")
-                    return
-                
-                tx_owner_id, symbol, amount = result
-                
-                # Kiểm tra quyền xóa
-                is_admin = check_permission(chat_id, current_user_id, 'delete') or \
-                           check_permission(chat_id, current_user_id, 'manage')
-                
-                can_delete = False
-                if tx_owner_id == owner_id:
-                    can_delete = True
-                elif is_admin:
-                    can_delete = True
-                elif current_user_id == tx_owner_id:
-                    can_delete = True
-                
-                if not can_delete:
-                    await safe_edit_message(query, "❌ Bạn không có quyền xóa giao dịch này!")
-                    return
-                
-                # Hỏi xác nhận
-                msg = (f"⚠️ *XÁC NHẬN XÓA*\n━━━━━━━━━━━━━━━━\n\n"
-                       f"• Giao dịch: #{tx_id}\n"
-                       f"• Coin: {symbol}\n"
-                       f"• Số lượng: {amount:.4f}\n\n"
-                       f"Bạn có chắc chắn muốn xóa?")
-                
-                keyboard = [[
-                    InlineKeyboardButton("✅ Có", callback_data=f"confirm_del_{tx_id}"),
-                    InlineKeyboardButton("❌ Không", callback_data=f"edit_{tx_id}")
-                ]]
-                
-                await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
-                return
-            
-            # ===========================================
-            # NHÓM 7: XỬ LÝ MENU CHI TIÊU
-            # ===========================================
             
             if data == "expense_income_menu":
                 msg = ("💰 *MENU THU NHẬP*\n\n"
@@ -5427,7 +5291,6 @@ try:
                 return
             
             if data == "expense_categories":
-                owner_id = ctx.bot_data.get('effective_user_id', query.from_user.id)
                 categories = get_expense_categories(owner_id)
                 
                 if not categories:
@@ -5438,7 +5301,7 @@ try:
                     await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
                     return
                 
-                msg = "📋 *DANH MỤC CỦA BẠN*\n━━━━━━━━━━━━━━━━\n\n"
+                msg = "📋 *DANH MỤC CHI TIÊU*\n━━━━━━━━━━━━━━━━\n\n"
                 keyboard = []
                 row = []
                 
@@ -5465,28 +5328,10 @@ try:
             
             if data == "expense_today":
                 try:
-                    current_user_id = query.from_user.id
-                    chat_id = query.message.chat.id
-                    effective_user_id = ctx.bot_data.get('effective_user_id', current_user_id)
+                    incomes_data = get_income_by_period(owner_id, 'day')
+                    expenses_data = get_expenses_by_period(owner_id, 'day')
                     
-                    if current_user_id != effective_user_id and not check_permission(chat_id, current_user_id, 'view'):
-                        msg = "❌ Bạn không có quyền xem dữ liệu!"
-                        await safe_edit_message(query, msg)
-                        return
-                    
-                    incomes_data = get_income_by_period(effective_user_id, 'day')
-                    expenses_data = get_expenses_by_period(effective_user_id, 'day')
-                    
-                    conn = sqlite3.connect(DB_PATH)
-                    c = conn.cursor()
-                    c.execute("SELECT username, first_name FROM users WHERE user_id = ?", (effective_user_id,))
-                    owner_info = c.fetchone()
-                    conn.close()
-                    
-                    raw_owner = f"@{owner_info[0]}" if owner_info and owner_info[0] else (owner_info[1] if owner_info else f"User {effective_user_id}")
-                    safe_owner = escape_markdown(raw_owner)
-                    
-                    msg = f"📅 *HÔM NAY ({get_vn_time().strftime('%d/%m/%Y')}) - {safe_owner}*\n━━━━━━━━━━━━━━━━\n\n"
+                    msg = f"📅 *THU CHI HÔM NAY ({get_vn_time().strftime('%d/%m/%Y')})*\n━━━━━━━━━━━━━━━━\n\n"
                     
                     if incomes_data['transactions']:
                         msg += "*💰 THU NHẬP:*\n"
@@ -5541,28 +5386,10 @@ try:
             
             if data == "expense_month":
                 try:
-                    current_user_id = query.from_user.id
-                    chat_id = query.message.chat.id
-                    effective_user_id = ctx.bot_data.get('effective_user_id', current_user_id)
+                    incomes_data = get_income_by_period(owner_id, 'month')
+                    expenses_data = get_expenses_by_period(owner_id, 'month')
                     
-                    if current_user_id != effective_user_id and not check_permission(chat_id, current_user_id, 'view'):
-                        msg = "❌ Bạn không có quyền xem dữ liệu!"
-                        await safe_edit_message(query, msg)
-                        return
-                    
-                    incomes_data = get_income_by_period(effective_user_id, 'month')
-                    expenses_data = get_expenses_by_period(effective_user_id, 'month')
-                    
-                    conn = sqlite3.connect(DB_PATH)
-                    c = conn.cursor()
-                    c.execute("SELECT username, first_name FROM users WHERE user_id = ?", (effective_user_id,))
-                    owner_info = c.fetchone()
-                    conn.close()
-                    
-                    raw_owner = f"@{owner_info[0]}" if owner_info and owner_info[0] else (owner_info[1] if owner_info else f"User {effective_user_id}")
-                    safe_owner = escape_markdown(raw_owner)
-                    
-                    msg = f"📅 *CHI TIÊU THÁNG {get_vn_time().strftime('%m/%Y')} - {safe_owner}*\n━━━━━━━━━━━━━━━━\n\n"
+                    msg = f"📅 *THU CHI THÁNG {get_vn_time().strftime('%m/%Y')}*\n━━━━━━━━━━━━━━━━\n\n"
                     
                     if incomes_data['transactions']:
                         msg += "*💰 THU NHẬP:*\n"
@@ -5617,34 +5444,16 @@ try:
             
             if data == "expense_recent":
                 try:
-                    current_user_id = query.from_user.id
-                    chat_id = query.message.chat.id
-                    effective_user_id = ctx.bot_data.get('effective_user_id', current_user_id)
-                    
-                    if current_user_id != effective_user_id and not check_permission(chat_id, current_user_id, 'view'):
-                        msg = "❌ Bạn không có quyền xem dữ liệu!"
-                        await safe_edit_message(query, msg)
-                        return
-                    
-                    conn = sqlite3.connect(DB_PATH)
-                    c = conn.cursor()
-                    c.execute("SELECT username, first_name FROM users WHERE user_id = ?", (effective_user_id,))
-                    owner_info = c.fetchone()
-                    conn.close()
-                    
-                    raw_owner = f"@{owner_info[0]}" if owner_info and owner_info[0] else (owner_info[1] if owner_info else f"User {effective_user_id}")
-                    safe_owner = escape_markdown(raw_owner)
-                    
-                    recent_incomes = get_recent_incomes(effective_user_id, 20)
-                    recent_expenses = get_recent_expenses(effective_user_id, 20)
+                    recent_incomes = get_recent_incomes(owner_id, 20)
+                    recent_expenses = get_recent_expenses(owner_id, 20)
                     
                     if not recent_incomes and not recent_expenses:
-                        msg = f"📭 *{safe_owner}* chưa có giao dịch nào!\n\n🕐 {format_vn_time_short()}"
+                        msg = f"📭 Chưa có giao dịch nào!\n\n🕐 {format_vn_time_short()}"
                         keyboard = [[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_expense")]]
                         await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
                         return
                     
-                    msg = f"🔄 *20 GIAO DỊCH GẦN ĐÂY - {safe_owner}*\n━━━━━━━━━━━━━━━━\n\n"
+                    msg = f"🔄 *20 GIAO DỊCH GẦN ĐÂY*\n━━━━━━━━━━━━━━━━\n\n"
                     
                     all_transactions = []
                     
@@ -5691,32 +5500,15 @@ try:
     
             if data.startswith("balance_"):
                 period = data.replace("balance_", "")
-                current_user_id = query.from_user.id
-                chat_id = query.message.chat.id
-                effective_user_id = ctx.bot_data.get('effective_user_id', current_user_id)
                 
-                if current_user_id != effective_user_id and not check_permission(chat_id, current_user_id, 'view'):
-                    msg = "❌ Bạn không có quyền xem dữ liệu!"
-                    await safe_edit_message(query, msg)
-                    return
-                
-                conn = sqlite3.connect(DB_PATH)
-                c = conn.cursor()
-                c.execute("SELECT username, first_name FROM users WHERE user_id = ?", (effective_user_id,))
-                user_info = c.fetchone()
-                conn.close()
-                
-                user_name = f"@{user_info[0]}" if user_info and user_info[0] else (user_info[1] if user_info else "")
-                safe_user_name = escape_markdown(user_name)
-                
-                balance_data = get_balance_summary(effective_user_id, period)
+                balance_data = get_balance_summary(owner_id, period)
                 
                 if not balance_data:
                     msg = "❌ Không thể tính cân đối!"
                     await safe_edit_message(query, msg)
                     return
                 
-                balance_msg = format_balance_message(balance_data, safe_user_name)
+                balance_msg = format_balance_message(balance_data, "")
                 
                 keyboard = [
                     [InlineKeyboardButton("📅 Hôm nay", callback_data="balance_day"),
