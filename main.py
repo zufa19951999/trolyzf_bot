@@ -4417,9 +4417,9 @@ try:
         
         if text == "💰 ĐẦU TƯ COIN":
             await update.message.reply_text(f"💰 *MENU ĐẦU TƯ COIN*\n━━━━━━━━━━━━━━━━\n\n🕐 {format_vn_time()}", parse_mode=ParseMode.MARKDOWN, reply_markup=get_invest_menu_keyboard(update.effective_user.id, update.effective_chat.id))
-        elif text == "💸 QUẢN LÝ CHI TIÊU":
+        elif text == "💵 QUẢN LÝ CHI TIÊU":
             await update.message.reply_text(f"💰 *QUẢN LÝ CHI TIÊU*\n━━━━━━━━━━━━━━━━\n\n🕐 {format_vn_time()}", parse_mode=ParseMode.MARKDOWN, reply_markup=get_expense_menu_keyboard())
-        elif text == "❓ HƯỚNG DẪN":
+        elif text == "🤔 HƯỚNG DẪN":
             await help_command(update, ctx)
 
     async def export_csv_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
