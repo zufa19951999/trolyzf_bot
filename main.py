@@ -1814,8 +1814,8 @@ try:
     # ==================== KEYBOARD ====================
     def get_main_keyboard():
         keyboard = [
-            [KeyboardButton("💰 ĐẦU TƯ COIN"), KeyboardButton("💸 QUẢN LÝ CHI TIÊU")],
-            [KeyboardButton("❓ HƯỚNG DẪN")]
+            [KeyboardButton("💰 ĐẦU TƯ COIN"), KeyboardButton("💵 QUẢN LÝ CHI TIÊU")],
+            [KeyboardButton("🤔 HƯỚNG DẪN")]
         ]
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
