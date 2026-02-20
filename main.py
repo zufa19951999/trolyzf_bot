@@ -4874,38 +4874,57 @@ try:
             elif data.startswith("confirm_del_"):
                 tx_id_str = data.replace("confirm_del_", "")
                 
-                # Kiểm tra nếu là cat_ thì bỏ qua
+                # NẾU LÀ cat_ THÌ XỬ LÝ XÓA DANH MỤC
                 if tx_id_str.startswith("cat_"):
-                    logger.warning(f"⚠️ Bỏ qua confirm_del_ với cat_id: {tx_id_str}")
-                    return
+                    logger.info(f"🔄 Chuyển sang xóa danh mục: {tx_id_str}")
+                    cat_id = tx_id_str[4:]  # Lấy số sau "cat_"
+                    
+                    try:
+                        category_id = int(cat_id)
+                    except ValueError:
+                        logger.error(f"❌ Lỗi: ID không hợp lệ: {cat_id}")
+                        await safe_edit_message(query, f"❌ ID danh mục không hợp lệ")
+                        return
+                    
+                    owner_id = ctx.bot_data.get('effective_user_id', query.from_user.id)
+                    
+                    # Thông báo đang xử lý
+                    await query.edit_message_text("🔄 Đang xóa danh mục...", parse_mode=None)
+                    
+                    try:
+                        success, result, deleted_count = delete_category(category_id, owner_id)
+                        
+                        if success:
+                            msg = (f"✅ *ĐÃ XÓA DANH MỤC*\n"
+                                   f"━━━━━━━━━━━━━━━━\n\n"
+                                   f"📋 Đã xóa danh mục: *{result}*\n"
+                                   f"💰 Đã xóa *{deleted_count}* khoản chi\n\n"
+                                   f"🕐 {format_vn_time()}")
+                        else:
+                            msg = (f"❌ *LỖI*\n"
+                                   f"━━━━━━━━━━━━━━━━\n\n"
+                                   f"{result}\n\n"
+                                   f"🕐 {format_vn_time()}")
+                        
+                        safe_msg = escape_markdown(msg)
+                        keyboard = [[InlineKeyboardButton("📋 Xem danh mục", callback_data="expense_categories"),
+                                     InlineKeyboardButton("🔙 Về menu", callback_data="back_to_expense")]]
+                        
+                        await safe_edit_message(query, safe_msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                        
+                    except Exception as e:
+                        logger.error(f"❌ Lỗi: {e}")
+                        await query.edit_message_text(f"❌ Lỗi: {str(e)[:100]}", parse_mode=None)
+                    
+                    return  # Kết thúc xử lý
                 
+                # XỬ LÝ XÓA GIAO DỊCH COIN (GIỮ NGUYÊN)
                 try:
                     tx_id = int(tx_id_str)
                 except ValueError:
                     logger.error(f"❌ Lỗi: tx_id không phải số: {tx_id_str}")
                     await safe_edit_message(query, f"❌ ID không hợp lệ: {tx_id_str}")
                     return
-                
-                uid = query.from_user.id
-                
-                conn = sqlite3.connect(DB_PATH)
-                c = conn.cursor()
-                c.execute('''DELETE FROM portfolio WHERE id = ? AND user_id = ?''', (tx_id, uid))
-                conn.commit()
-                affected = c.rowcount
-                conn.close()
-                
-                if affected > 0:
-                    msg = f"✅ *ĐÃ XÓA GIAO DỊCH*\n━━━━━━━━━━━━━━━━\n\nĐã xóa giao dịch #{tx_id}\n\n🕐 {format_vn_time()}"
-                else:
-                    msg = f"❌ *LỖI*\n━━━━━━━━━━━━━━━━\n\nKhông thể xóa giao dịch #{tx_id}\n\n🕐 {format_vn_time()}"
-                
-                # Escape message
-                safe_msg = escape_markdown(msg)
-                
-                keyboard = [[InlineKeyboardButton("🔙 Về danh mục", callback_data="show_portfolio")]]
-                
-                await safe_edit_message(query, safe_msg, reply_markup=InlineKeyboardMarkup(keyboard))
 
             elif data.startswith("del_cat_"):
                 # Phần này đã đúng, giữ nguyên
