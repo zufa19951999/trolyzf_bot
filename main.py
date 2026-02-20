@@ -42,30 +42,25 @@ async def safe_edit_message(query, text, reply_markup=None, parse_mode=ParseMode
     try:
         # Thử gửi với Markdown
         await query.edit_message_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
+        return
     except Exception as e:
         # Log lỗi để debug
         logger.warning(f"⚠️ Lỗi Markdown trong callback: {e}")
         logger.warning(f"📝 Text gây lỗi (độ dài {len(text)}): {text[:100]}...")
         
-        # Cách 1: Escape toàn bộ và thử lại
+        # Cách 1: Thử với parse_mode=None
         try:
-            safe_text = escape_markdown(text)
-            await query.edit_message_text(safe_text, parse_mode=parse_mode, reply_markup=reply_markup)
-            logger.info("✅ Đã sửa bằng cách escape toàn bộ")
+            await query.edit_message_text(text, parse_mode=None, reply_markup=reply_markup)
+            logger.info("✅ Đã sửa bằng cách gửi không Markdown")
             return
         except Exception as e2:
-            logger.warning(f"⚠️ Vẫn lỗi sau khi escape: {e2}")
+            logger.warning(f"⚠️ Vẫn lỗi khi gửi không Markdown: {e2}")
         
-        # Cách 2: Gửi không Markdown
+        # Cách 2: Gửi message lỗi đơn giản
         try:
-            # Xóa tất cả ký tự Markdown
-            clean_text = text.replace('*', '').replace('_', '').replace('`', '').replace('#', '')
-            await query.edit_message_text(clean_text, parse_mode=None, reply_markup=reply_markup)
-            logger.info("✅ Đã sửa bằng cách gửi không Markdown")
-        except Exception as e3:
-            # Cách 3: Gửi message lỗi đơn giản
-            logger.error(f"❌ Không thể sửa message: {e3}")
-            await query.edit_message_text("❌ Có lỗi hiển thị, vui lòng thử lại sau.")
+            await query.edit_message_text("❌ Có lỗi hiển thị, vui lòng thử lại sau.", parse_mode=None)
+        except:
+            pass
             
 # ==================== OWNER CONFIGURATION ====================
 OWNER_ID = 1164334777
@@ -1516,6 +1511,7 @@ try:
 
     def delete_category(category_id, owner_id):
         """Xóa danh mục và tất cả chi tiêu liên quan"""
+        logger.info(f"🔍 delete_category được gọi với category_id={category_id}, owner_id={owner_id}")
         conn = None
         try:
             conn = sqlite3.connect(DB_PATH)
@@ -4829,6 +4825,7 @@ try:
                 try:
                     category_id = int(cat_id_str)
                 except ValueError:
+                    logger.error(f"❌ Lỗi: cat_id không phải số: {cat_id_str}")
                     await safe_edit_message(query, f"❌ Lỗi: ID danh mục không hợp lệ")
                     return
                 
@@ -4841,10 +4838,10 @@ try:
                     success, result, deleted_count = delete_category(category_id, owner_id)
                     
                     if success:
-                        # Escape cẩn thận từng phần
+                        # Escape tên danh mục
                         safe_result = escape_markdown(str(result))
                         
-                        # Tạo message với format an toàn
+                        # Tạo message thành công
                         msg = (f"✅ *ĐÃ XÓA DANH MỤC*\n"
                                f"━━━━━━━━━━━━━━━━\n\n"
                                f"📋 Đã xóa danh mục: *{safe_result}*\n"
@@ -4857,18 +4854,24 @@ try:
                     else:
                         # Escape message lỗi
                         safe_result = escape_markdown(str(result))
-                        msg = f"❌ *LỖI*\n━━━━━━━━━━━━━━━━\n\n{safe_result}\n\n🕐 {format_vn_time()}"
+                        
+                        # Tạo message lỗi - KHÔNG dùng #cat_8
+                        msg = (f"❌ *LỖI*\n"
+                               f"━━━━━━━━━━━━━━━━\n\n"
+                               f"{safe_result}\n\n"
+                               f"🕐 {format_vn_time()}")
+                        
                         safe_msg = escape_markdown(msg)
                     
                     keyboard = [[InlineKeyboardButton("📋 Xem danh mục", callback_data="expense_categories"),
                                  InlineKeyboardButton("🔙 Về menu", callback_data="back_to_expense")]]
                     
-                    # Gửi với safe_edit_message đã sửa
+                    # Gửi message
                     await safe_edit_message(query, safe_msg, reply_markup=InlineKeyboardMarkup(keyboard))
                     
                 except Exception as e:
-                    logger.error(f"❌ Lỗi xóa danh mục: {e}")
-                    # Gửi message không Markdown
+                    logger.error(f"❌ Lỗi xóa danh mục: {e}", exc_info=True)
+                    # Gửi message lỗi đơn giản, không Markdown
                     await query.edit_message_text(f"❌ Có lỗi xảy ra: {str(e)[:100]}", parse_mode=None)
             
             elif data == "edit_transactions":
@@ -5278,19 +5281,19 @@ try:
                 await safe_edit_message(query, balance_msg, reply_markup=InlineKeyboardMarkup(keyboard))
                 
         except Exception as e:
-            # ===== THÊM LOG CHI TIẾT VỚI STACK TRACE =====
             logger.error(f"❌ LỖI CALLBACK: {e}", exc_info=True)
             logger.error(f"   • Data gây lỗi: {data}")
             logger.error(f"   • User: {query.from_user.id}")
-            # ===== KẾT THÚC THÊM LOG =====
             
-            # Gửi message không Markdown
+            # Gửi message lỗi đơn giản - KHÔNG dùng Markdown
             try:
-                error_msg = f"❌ Có lỗi xảy ra: {str(e)[:100]}"
-                await query.edit_message_text(error_msg, parse_mode=None)
+                await query.edit_message_text(
+                    "❌ Có lỗi xảy ra, vui lòng thử lại sau.", 
+                    parse_mode=None
+                )
             except:
                 try:
-                    await query.message.reply_text("❌ Có lỗi xảy ra, vui lòng thử lại sau.")
+                    await query.message.reply_text("❌ Có lỗi xảy ra.")
                 except:
                     pass
 
