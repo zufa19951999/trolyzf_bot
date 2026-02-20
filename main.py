@@ -2248,6 +2248,13 @@ try:
         
         # Trong group
         if chat_type in ['group', 'supergroup']:
+            # Lấy tên nhóm từ Telegram
+            try:
+                chat = await ctx.bot.get_chat(chat_id)
+                group_name = chat.title or "Nhóm không tên"
+            except:
+                group_name = "Nhóm này"
+            
             # Kiểm tra có phải chủ sở hữu không
             owner_id = get_group_owner(chat_id)
             is_group_owner = (user_id == owner_id)
@@ -2258,11 +2265,6 @@ try:
             c.execute('''SELECT can_view_all, can_edit_all, can_delete_all, can_manage_perms 
                         FROM permissions WHERE group_id = ? AND user_id = ?''', (chat_id, user_id))
             result = c.fetchone()
-            
-            # Lấy tên nhóm
-            c.execute("SELECT title FROM groups WHERE group_id = ?", (chat_id,))
-            group = c.fetchone()
-            group_name = group[0] if group else "Nhóm này"
             conn.close()
             
             # Tạo message
