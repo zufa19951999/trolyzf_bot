@@ -331,6 +331,14 @@ def require_permission(permission_type):
             
             # Trong group, kiểm tra quyền
             if chat_type in ['group', 'supergroup']:
+                # SỬA: Admin có tất cả quyền
+                if check_permission(chat_id, user_id, 'manage') or \
+                   check_permission(chat_id, user_id, 'edit') or \
+                   check_permission(chat_id, user_id, 'delete'):
+                    # Admin được làm mọi thứ
+                    return await func(update, context, *args, **kwargs)
+                
+                # Kiểm tra quyền cụ thể
                 if not check_permission(chat_id, user_id, permission_type):
                     await update.message.reply_text(f"❌ Bạn không có quyền {permission_type} trong group này!")
                     return
@@ -342,6 +350,7 @@ def require_permission(permission_type):
             return await func(update, context, *args, **kwargs)
         return wrapper
     return decorator
+
 
 def require_group_permission(permission_type):
     def decorator(func):
@@ -855,26 +864,38 @@ try:
             return False
 
     def check_permission(group_id, user_id, permission_type='view'):
+        """Kiểm tra quyền của user trong group"""
         conn = None
         try:
+            # Owner bot luôn có quyền
+            if is_owner(user_id):
+                return True
+            
+            # Chủ sở hữu group luôn có quyền
+            owner_id = get_group_owner(group_id)
+            if user_id == owner_id:
+                return True
+            
             conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
             
-            c.execute('''SELECT can_view_all, can_edit_all, can_delete_all, can_manage_perms FROM permissions WHERE group_id = ? AND user_id = ?''', (group_id, user_id))
+            c.execute('''SELECT can_view_all, can_edit_all, can_delete_all, can_manage_perms 
+                        FROM permissions WHERE group_id = ? AND user_id = ?''', 
+                        (group_id, user_id))
             result = c.fetchone()
             
             if not result:
-                logger.info(f"🔍 User {user_id} không có quyền trong group {group_id}")
                 return False
             
             can_view, can_edit, can_delete, can_manage = result
             
+            # Admin có quyền cao hơn user thường
             if permission_type == 'view':
-                return can_view == 1
+                return can_view == 1 or can_edit == 1 or can_delete == 1 or can_manage == 1
             elif permission_type == 'edit':
-                return can_edit == 1
+                return can_edit == 1 or can_manage == 1  # Manage cũng có quyền edit
             elif permission_type == 'delete':
-                return can_delete == 1
+                return can_delete == 1 or can_manage == 1  # Manage cũng có quyền delete
             elif permission_type == 'manage':
                 return can_manage == 1
             
@@ -1072,22 +1093,40 @@ try:
             if update.effective_user:
                 await update_user_info_async(update.effective_user)
             
-            effective_user_id, current_user_id = get_effective_user_id(update, context)
+            chat_type = update.effective_chat.type
+            current_user_id = update.effective_user.id
+            chat_id = update.effective_chat.id
             
-            if effective_user_id is None:
-                chat_type = update.effective_chat.type
-                if chat_type in ['group', 'supergroup']:
-                    await update.message.reply_text(f"❌ Group này chưa được cài đặt chủ sở hữu!\nVui lòng liên hệ @{OWNER_USERNAME} để thiết lập.", parse_mode=ParseMode.MARKDOWN)
+            # Xác định owner_id (chủ sở hữu dữ liệu)
+            if chat_type in ['group', 'supergroup']:
+                owner_id = get_group_owner(chat_id)
+                
+                if not owner_id:
+                    await update.message.reply_text(f"❌ Group chưa được cài đặt chủ sở hữu!\nVui lòng liên hệ @{OWNER_USERNAME}")
                     return
+                
+                # QUAN TRỌNG: Kiểm tra quyền admin
+                is_admin = check_permission(chat_id, current_user_id, 'edit') or \
+                          check_permission(chat_id, current_user_id, 'delete') or \
+                          check_permission(chat_id, current_user_id, 'manage')
+                
+                if is_admin:
+                    # Admin có quyền thao tác trên dữ liệu của chủ sở hữu
+                    effective_user_id = owner_id
+                    logger.info(f"👑 Admin {current_user_id} đang thao tác trên dữ liệu của owner {owner_id}")
+                else:
+                    # User thường chỉ xem được dữ liệu của chính mình (nếu có)
+                    effective_user_id = current_user_id
+                    logger.info(f"👤 User {current_user_id} tự quản lý dữ liệu riêng")
+            else:
+                # Private chat: user tự quản lý
+                effective_user_id = current_user_id
             
             context.bot_data['effective_user_id'] = effective_user_id
             context.bot_data['current_user_id'] = current_user_id
             
-            logger.info(f"🆔 Current: {current_user_id}, Data Owner: {effective_user_id}")
-            
             return await func(update, context, *args, **kwargs)
         return wrapper
-
     # ==================== HÀM ĐỊNH DẠNG ====================
     def fmt_price(p):
         try:
@@ -2442,7 +2481,7 @@ try:
         await update.message.reply_text("\n━━━━━━━━━━━━\n".join(results) + f"\n\n🕐 {format_vn_time_short()}", parse_mode='Markdown')
 
     @auto_update_user
-    @require_permission('user')
+    @require_permission('edit')
     async def buy_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         owner_id = ctx.bot_data.get('effective_user_id', update.effective_user.id)
         
@@ -2565,14 +2604,19 @@ try:
                f"{'✅' if profit>=0 else '❌'} LN: `{fmt_price(profit)}` ({profit_percent:+.2f}%)\n\n"
                f"🕐 {format_vn_time()}")
         await update.message.reply_text(msg, parse_mode='Markdown')
-
+        
     @auto_update_user
-    @require_permission('staff')
+    @require_permission('edit')
     async def edit_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        uid = ctx.bot_data.get('effective_user_id', update.effective_user.id)
-    
+        # QUAN TRỌNG: Lấy owner_id (chủ sở hữu) chứ không phải user_id hiện tại
+        owner_id = ctx.bot_data.get('effective_user_id', update.effective_user.id)
+        current_user_id = ctx.bot_data.get('current_user_id', update.effective_user.id)
+        
+        logger.info(f"edit_command: owner_id={owner_id}, current_user={current_user_id}")
+        
         if not ctx.args:
-            transactions = get_transaction_detail(uid)
+            # Hiển thị danh sách giao dịch của OWNER (chủ sở hữu)
+            transactions = get_transaction_detail(owner_id)
             if not transactions:
                 await update.message.reply_text("📭 Danh mục trống!")
                 return
@@ -2596,14 +2640,15 @@ try:
             keyboard.append([InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")])
     
             msg += f"\n🕐 {format_vn_time_short()}"
-    
-            await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
+            await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, 
+                                          reply_markup=InlineKeyboardMarkup(keyboard))
             return
     
+        # Xem chi tiết 1 giao dịch
         if len(ctx.args) == 1:
             try:
                 tx_id = int(ctx.args[0])
-                transactions = get_transaction_detail(uid)
+                transactions = get_transaction_detail(owner_id)
                 
                 tx = next((t for t in transactions if t[0] == tx_id), None)
                 if not tx:
@@ -2628,10 +2673,12 @@ try:
                              InlineKeyboardButton("🗑 Xóa", callback_data=f"del_{tx_id}")],
                             [InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
                 
-                await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
+                await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, 
+                                              reply_markup=InlineKeyboardMarkup(keyboard))
             except ValueError:
                 await update.message.reply_text("❌ ID không hợp lệ")
         
+        # Sửa giao dịch
         elif len(ctx.args) == 3:
             try:
                 tx_id = int(ctx.args[0])
@@ -2642,40 +2689,98 @@ try:
                     await update.message.reply_text("❌ SL và giá phải > 0")
                     return
                 
+                # SỬA: Kiểm tra giao dịch thuộc về ai
                 conn = sqlite3.connect(DB_PATH)
                 c = conn.cursor()
+                c.execute('''SELECT user_id FROM portfolio WHERE id = ?''', (tx_id,))
+                result = c.fetchone()
+                
+                if not result:
+                    await update.message.reply_text(f"❌ Không tìm thấy giao dịch #{tx_id}")
+                    conn.close()
+                    return
+                
+                tx_owner_id = result[0]
+                
+                # Kiểm tra quyền: phải là owner hoặc có quyền edit
+                if tx_owner_id != owner_id:
+                    # Nếu không phải owner, kiểm tra xem có phải admin không
+                    if not check_permission(update.effective_chat.id, current_user_id, 'edit'):
+                        await update.message.reply_text("❌ Bạn không có quyền sửa giao dịch này!")
+                        conn.close()
+                        return
+                
+                # Thực hiện sửa
                 new_total = new_amount * new_price
-                c.execute('''UPDATE portfolio SET amount = ?, buy_price = ?, total_cost = ? WHERE id = ? AND user_id = ?''',
-                          (new_amount, new_price, new_total, tx_id, uid))
+                c.execute('''UPDATE portfolio SET amount = ?, buy_price = ?, total_cost = ? 
+                            WHERE id = ?''', (new_amount, new_price, new_total, tx_id))
                 conn.commit()
                 affected = c.rowcount
                 conn.close()
                 
                 if affected > 0:
-                    await update.message.reply_text(f"✅ Đã cập nhật giao dịch #{tx_id}\n📊 SL mới: `{new_amount:.4f}`\n💰 Giá mới: `{fmt_price(new_price)}`\n\n🕐 {format_vn_time()}", parse_mode='Markdown')
+                    await update.message.reply_text(f"✅ Đã sửa giao dịch #{tx_id}\n📊 SL mới: `{new_amount:.4f}`\n💰 Giá mới: `{fmt_price(new_price)}`\n\n🕐 {format_vn_time()}", parse_mode='Markdown')
                 else:
-                    await update.message.reply_text(f"❌ Không tìm thấy giao dịch #{tx_id}")
+                    await update.message.reply_text(f"❌ Không thể sửa giao dịch #{tx_id}")
+                    
             except ValueError:
                 await update.message.reply_text("❌ /edit [id] [sl] [giá]")
         else:
             await update.message.reply_text("❌ /edit - Xem DS\n/edit [id] - Xem chi tiết\n/edit [id] [sl] [giá] - Sửa")
 
     @auto_update_user
-    @require_permission('staff')
+    @require_permission('delete')
     async def delete_tx_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        uid = ctx.bot_data.get('effective_user_id', update.effective_user.id)
-    
+        owner_id = ctx.bot_data.get('effective_user_id', update.effective_user.id)
+        current_user_id = ctx.bot_data.get('current_user_id', update.effective_user.id)
+        
+        logger.info(f"delete_tx_command: owner_id={owner_id}, current_user={current_user_id}")
+        
         if not ctx.args:
             await update.message.reply_text("❌ /del [id]")
             return
-    
+        
         try:
             tx_id = int(ctx.args[0])
-    
+            
+            # Kiểm tra giao dịch thuộc về ai
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute('''SELECT user_id FROM portfolio WHERE id = ?''', (tx_id,))
+            result = c.fetchone()
+            conn.close()
+            
+            if not result:
+                await update.message.reply_text(f"❌ Không tìm thấy giao dịch #{tx_id}")
+                return
+            
+            tx_owner_id = result[0]
+            
+            # Kiểm tra quyền xóa
+            can_delete = False
+            
+            if tx_owner_id == owner_id:
+                # Đây là giao dịch của chủ sở hữu, có thể xóa
+                can_delete = True
+                logger.info(f"✅ User {current_user_id} là owner, được xóa giao dịch #{tx_id}")
+            elif check_permission(update.effective_chat.id, current_user_id, 'delete'):
+                # Admin có quyền delete được xóa giao dịch của chủ sở hữu
+                can_delete = True
+                logger.info(f"✅ Admin {current_user_id} có quyền delete, được xóa giao dịch #{tx_id}")
+            else:
+                logger.info(f"❌ User {current_user_id} không có quyền xóa giao dịch #{tx_id}")
+            
+            if not can_delete:
+                await update.message.reply_text("❌ Bạn không có quyền xóa giao dịch này!")
+                return
+            
+            # Hỏi xác nhận
             keyboard = [[InlineKeyboardButton("✅ Có", callback_data=f"confirm_del_{tx_id}"),
-                         InlineKeyboardButton("❌ Không", callback_data="show_portfolio")]]
-    
-            await update.message.reply_text(f"⚠️ *Xác nhận xóa giao dịch #{tx_id}?*\n\n🕐 {format_vn_time_short()}", parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
+                         InlineKeyboardButton("❌ Không", callback_data="edit_transactions")]]
+            
+            await update.message.reply_text(f"⚠️ *Xác nhận xóa giao dịch #{tx_id}?*\n\n🕐 {format_vn_time_short()}", 
+                                           parse_mode=ParseMode.MARKDOWN,
+                                           reply_markup=InlineKeyboardMarkup(keyboard))
         except ValueError:
             await update.message.reply_text("❌ ID không hợp lệ")
 
@@ -4874,36 +4979,35 @@ try:
             elif data.startswith("confirm_del_"):
                 tx_id_str = data.replace("confirm_del_", "")
                 
-                # NẾU LÀ cat_ THÌ XỬ LÝ XÓA DANH MỤC
+                # Kiểm tra nếu là cat_ thì xử lý riêng
                 if tx_id_str.startswith("cat_"):
-                    logger.info(f"🔄 Chuyển sang xóa danh mục: {tx_id_str}")
-                    cat_id = tx_id_str[4:]  # Lấy số sau "cat_"
-                    
+                    # Xử lý xóa danh mục (giữ nguyên code cũ)
+                    cat_id = tx_id_str[4:]
                     try:
                         category_id = int(cat_id)
                     except ValueError:
-                        logger.error(f"❌ Lỗi: ID không hợp lệ: {cat_id}")
-                        await safe_edit_message(query, f"❌ ID danh mục không hợp lệ")
+                        await safe_edit_message(query, "❌ ID danh mục không hợp lệ")
                         return
                     
                     owner_id = ctx.bot_data.get('effective_user_id', query.from_user.id)
                     
-                    # Thông báo đang xử lý
                     await query.edit_message_text("🔄 Đang xóa danh mục...", parse_mode=None)
                     
                     try:
                         success, result, deleted_count = delete_category(category_id, owner_id)
                         
                         if success:
+                            safe_result = escape_markdown(str(result))
                             msg = (f"✅ *ĐÃ XÓA DANH MỤC*\n"
                                    f"━━━━━━━━━━━━━━━━\n\n"
-                                   f"📋 Đã xóa danh mục: *{result}*\n"
+                                   f"📋 Đã xóa danh mục: *{safe_result}*\n"
                                    f"💰 Đã xóa *{deleted_count}* khoản chi\n\n"
                                    f"🕐 {format_vn_time()}")
                         else:
+                            safe_result = escape_markdown(str(result))
                             msg = (f"❌ *LỖI*\n"
                                    f"━━━━━━━━━━━━━━━━\n\n"
-                                   f"{result}\n\n"
+                                   f"{safe_result}\n\n"
                                    f"🕐 {format_vn_time()}")
                         
                         safe_msg = escape_markdown(msg)
@@ -4916,15 +5020,54 @@ try:
                         logger.error(f"❌ Lỗi: {e}")
                         await query.edit_message_text(f"❌ Lỗi: {str(e)[:100]}", parse_mode=None)
                     
-                    return  # Kết thúc xử lý
+                    return
                 
-                # XỬ LÝ XÓA GIAO DỊCH COIN (GIỮ NGUYÊN)
+                # XỬ LÝ XÓA GIAO DỊCH COIN
                 try:
                     tx_id = int(tx_id_str)
                 except ValueError:
-                    logger.error(f"❌ Lỗi: tx_id không phải số: {tx_id_str}")
-                    await safe_edit_message(query, f"❌ ID không hợp lệ: {tx_id_str}")
+                    await safe_edit_message(query, "❌ ID không hợp lệ")
                     return
+                
+                owner_id = ctx.bot_data.get('effective_user_id')
+                current_user_id = query.from_user.id
+                
+                logger.info(f"Xóa giao dịch #{tx_id} - owner_id={owner_id}, current_user={current_user_id}")
+                
+                # Kiểm tra quyền xóa
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                c.execute('''SELECT user_id FROM portfolio WHERE id = ?''', (tx_id,))
+                result = c.fetchone()
+                conn.close()
+                
+                if not result:
+                    await safe_edit_message(query, f"❌ Không tìm thấy giao dịch #{tx_id}")
+                    return
+                
+                tx_owner_id = result[0]
+                
+                # Admin được phép xóa giao dịch của owner
+                can_delete = False
+                
+                if tx_owner_id == owner_id:
+                    can_delete = True
+                    logger.info(f"✅ User {current_user_id} là owner, được xóa")
+                elif check_permission(query.message.chat.id, current_user_id, 'delete'):
+                    can_delete = True
+                    logger.info(f"✅ Admin {current_user_id} có quyền delete, được xóa")
+                else:
+                    logger.info(f"❌ User {current_user_id} không có quyền xóa")
+                
+                if can_delete:
+                    if delete_transaction(tx_id, tx_owner_id):
+                        msg = f"✅ *ĐÃ XÓA GIAO DỊCH #{tx_id}*\n━━━━━━━━━━━━━━━━\n\n🕐 {format_vn_time()}"
+                        keyboard = [[InlineKeyboardButton("🔙 Về danh sách", callback_data="edit_transactions")]]
+                        await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                    else:
+                        await safe_edit_message(query, "❌ Lỗi khi xóa giao dịch!")
+                else:
+                    await safe_edit_message(query, "❌ Bạn không có quyền xóa giao dịch này!")
 
             elif data.startswith("del_cat_"):
                 # Phần này đã đúng, giữ nguyên
