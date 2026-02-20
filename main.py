@@ -1523,49 +1523,105 @@ try:
             
             # BẬT KHÓA NGOẠI
             c.execute("PRAGMA foreign_keys = ON")
+            logger.info(f"🔧 PRAGMA foreign_keys = ON cho user {owner_id}")
             
             # Kiểm tra danh mục có tồn tại không
+            logger.info(f"🔍 Đang tìm danh mục ID {category_id} cho user {owner_id}")
             c.execute('''SELECT id, name FROM expense_categories WHERE id = ? AND user_id = ?''', (category_id, owner_id))
             category = c.fetchone()
             
             if not category:
+                logger.warning(f"❌ Không tìm thấy danh mục ID {category_id} cho user {owner_id}")
                 return False, "❌ Không tìm thấy danh mục!", 0
             
             category_name = category[1]
-            logger.info(f"📝 Đang xóa danh mục: '{category_name}' (ID: {category_id})")
+            logger.info(f"📝 Tìm thấy danh mục: '{category_name}' (ID: {category_id})")
             
             # Đếm số khoản chi
+            logger.info(f"🔍 Đếm số khoản chi trong danh mục {category_id}")
             c.execute('''SELECT COUNT(*) FROM expenses WHERE category_id = ? AND user_id = ?''', (category_id, owner_id))
             expenses_count = c.fetchone()[0]
+            logger.info(f"📊 Có {expenses_count} khoản chi trong danh mục '{category_name}'")
             
             # Bắt đầu transaction
+            logger.info("🔄 Bắt đầu transaction...")
             c.execute("BEGIN TRANSACTION")
             
             # Xóa chi tiêu trước
+            logger.info(f"🗑 Đang xóa chi tiêu trong danh mục {category_id}...")
             c.execute('''DELETE FROM expenses WHERE category_id = ? AND user_id = ?''', (category_id, owner_id))
             deleted_expenses = c.rowcount
+            logger.info(f"✅ Đã xóa {deleted_expenses} khoản chi (dự kiến: {expenses_count})")
             
             # Xóa danh mục
+            logger.info(f"🗑 Đang xóa danh mục {category_id}...")
             c.execute('''DELETE FROM expense_categories WHERE id = ? AND user_id = ?''', (category_id, owner_id))
             
             if c.rowcount == 0:
+                logger.error(f"❌ Không thể xóa danh mục {category_id} - rowcount = 0")
                 conn.rollback()
+                logger.info("↩️ Đã rollback transaction")
                 return False, "❌ Không thể xóa danh mục!", 0
             
+            # Commit transaction
             conn.commit()
+            logger.info("💾 Đã commit transaction")
             
-            logger.info(f"✅ Đã xóa danh mục '{category_name}' (ID: {category_id}), kèm {deleted_expenses} khoản chi")
+            logger.info(f"✅ ĐÃ XÓA THÀNH CÔNG danh mục '{category_name}' (ID: {category_id}), kèm {deleted_expenses} khoản chi")
             
             return True, category_name, deleted_expenses
             
+        except sqlite3.IntegrityError as e:
+            # Lỗi ràng buộc khóa ngoại
+            if conn:
+                conn.rollback()
+                logger.info("↩️ Đã rollback transaction do lỗi IntegrityError")
+            
+            logger.error(f"❌ LỖI INTEGRITY: {e}", exc_info=True)
+            logger.error(f"   • category_id: {category_id}")
+            logger.error(f"   • owner_id: {owner_id}")
+            
+            # Thử cách khác: xóa từng bước
+            try:
+                logger.info("🔄 Thử xóa bằng cách 2 (không dùng transaction)...")
+                conn2 = sqlite3.connect(DB_PATH)
+                c2 = conn2.cursor()
+                
+                # Xóa chi tiêu trước
+                c2.execute('''DELETE FROM expenses WHERE category_id = ? AND user_id = ?''', (category_id, owner_id))
+                deleted = c2.rowcount
+                logger.info(f"✅ Cách 2: Đã xóa {deleted} khoản chi")
+                
+                # Xóa danh mục sau
+                c2.execute('''DELETE FROM expense_categories WHERE id = ? AND user_id = ?''', (category_id, owner_id))
+                logger.info(f"✅ Cách 2: Đã xóa danh mục")
+                
+                conn2.commit()
+                conn2.close()
+                
+                logger.info(f"✅ Cách 2 THÀNH CÔNG: đã xóa danh mục '{category_name}', kèm {deleted} khoản chi")
+                return True, category_name, deleted
+                
+            except Exception as e2:
+                logger.error(f"❌ Cách 2 cũng thất bại: {e2}", exc_info=True)
+                return False, f"❌ Lỗi ràng buộc dữ liệu: {str(e)}", 0
+                
         except Exception as e:
             if conn:
                 conn.rollback()
-            logger.error(f"❌ Lỗi xóa danh mục: {e}")
+                logger.info("↩️ Đã rollback transaction do lỗi Exception")
+            
+            logger.error(f"❌ LỖI NGOẠI LỆ: {e}", exc_info=True)
+            logger.error(f"   • category_id: {category_id}")
+            logger.error(f"   • owner_id: {owner_id}")
+            logger.error(f"   • Kiểu lỗi: {type(e).__name__}")
+            
             return False, str(e), 0
+            
         finally:
             if conn:
                 conn.close()
+                logger.info("🔚 Đã đóng kết nối database")
 
     def edit_income(income_id, user_id, amount=None, source=None, note=None, currency=None):
         """Sửa thông tin khoản thu
@@ -3510,9 +3566,12 @@ try:
             
             for i, cat in enumerate(categories, 1):
                 cat_id, name, budget, created = cat
-                msg += f"{i}. *{name}* - {format_currency_simple(budget, 'VND')}\n"
+                safe_name = escape_markdown(name)  # THÊM DÒNG NÀY
+                msg += f"{i}. *{safe_name}* - {format_currency_simple(budget, 'VND')}\n"
                 
-                row.append(InlineKeyboardButton(f"{i}", callback_data=f"del_cat_{cat_id}"))
+                # ĐẢM BẢO callback_data là string
+                callback_data = f"del_cat_{cat_id}"
+                row.append(InlineKeyboardButton(f"{i}", callback_data=callback_data))
                 if len(row) == 5:
                     keyboard.append(row)
                     row = []
@@ -3524,7 +3583,9 @@ try:
             
             msg += f"\n🕐 {format_vn_time_short()}"
             
-            await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
+            # SỬA DÒNG NÀY - dùng safe_edit_message thay vì reply_text trực tiếp
+            safe_msg = escape_markdown(msg)
+            await update.message.reply_text(safe_msg, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
             return
         
         try:
@@ -3540,7 +3601,20 @@ try:
                     category_name = cat[1]
                     break
             
-            await update.message.reply_text(f"⚠️ *CẢNH BÁO: XÓA DANH MỤC*\n━━━━━━━━━━━━━━━━\n\n📋 Danh mục: *{category_name}* (ID: {category_id})\n\n❗️ Hành động này sẽ xóa:\n• Danh mục *{category_name}*\n• Tất cả chi tiêu trong danh mục này\n\n❌ *Không thể khôi phục!*\n\nBạn có chắc chắn muốn xóa?", parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
+            # ESCAPE tên danh mục
+            safe_category_name = escape_markdown(category_name)
+            
+            msg = (f"⚠️ *CẢNH BÁO: XÓA DANH MỤC*\n━━━━━━━━━━━━━━━━\n\n"
+                   f"📋 Danh mục: *{safe_category_name}* (ID: {category_id})\n\n"
+                   f"❗️ Hành động này sẽ xóa:\n"
+                   f"• Danh mục *{safe_category_name}*\n"
+                   f"• Tất cả chi tiêu trong danh mục này\n\n"
+                   f"❌ *Không thể khôi phục!*\n\n"
+                   f"Bạn có chắc chắn muốn xóa?")
+            
+            safe_msg = escape_markdown(msg)
+            await update.message.reply_text(safe_msg, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
+            
         except ValueError:
             await update.message.reply_text("❌ ID không hợp lệ!")
 
@@ -3564,7 +3638,9 @@ try:
         keyboard = [[InlineKeyboardButton("✅ Xác nhận xóa", callback_data=f"confirm_del_cat_{category_id}"),
                      InlineKeyboardButton("❌ Hủy", callback_data="expense_categories")]]
         
-        await update.message.reply_text(f"⚠️ *XÁC NHẬN XÓA DANH MỤC #{category_id}*\n\nBạn có chắc chắn muốn xóa?", parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
+        msg = f"⚠️ *XÁC NHẬN XÓA DANH MỤC #{category_id}*\n\nBạn có chắc chắn muốn xóa?"
+        safe_msg = escape_markdown(msg)
+        await update.message.reply_text(safe_msg, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
 
     @auto_update_user
     async def balance_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -4253,7 +4329,13 @@ try:
         await query.answer()
         if query.from_user:
             await update_user_info_async(query.from_user)
-        logger.info(f"Callback: {query.data}")
+        
+        # ===== THÊM LOG DEBUG CHI TIẾT =====
+        logger.info(f"🔔 CALLBACK RECEIVED: {query.data}")
+        logger.info(f"   • From user: {query.from_user.id} (@{query.from_user.username})")
+        logger.info(f"   • Chat ID: {query.message.chat.id}")
+        logger.info(f"   • Message ID: {query.message.message_id}")
+        # ===== KẾT THÚC THÊM LOG =====
         
         data = query.data
         
@@ -5196,15 +5278,21 @@ try:
                 await safe_edit_message(query, balance_msg, reply_markup=InlineKeyboardMarkup(keyboard))
                 
         except Exception as e:
-            logger.error(f"Lỗi callback: {e}")
-            # Gửi message không Markdown để tránh lỗi
+            # ===== THÊM LOG CHI TIẾT VỚI STACK TRACE =====
+            logger.error(f"❌ LỖI CALLBACK: {e}", exc_info=True)
+            logger.error(f"   • Data gây lỗi: {data}")
+            logger.error(f"   • User: {query.from_user.id}")
+            # ===== KẾT THÚC THÊM LOG =====
+            
+            # Gửi message không Markdown
             try:
-                await query.edit_message_text(
-                    f"❌ Có lỗi xảy ra: {str(e)[:100]}", 
-                    parse_mode=None
-                )
+                error_msg = f"❌ Có lỗi xảy ra: {str(e)[:100]}"
+                await query.edit_message_text(error_msg, parse_mode=None)
             except:
-                pass
+                try:
+                    await query.message.reply_text("❌ Có lỗi xảy ra, vui lòng thử lại sau.")
+                except:
+                    pass
 
     # ==================== WEBHOOK SETUP ====================
     async def setup_webhook():
