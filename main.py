@@ -48,7 +48,12 @@ async def safe_edit_message(query, text, reply_markup=None, parse_mode=ParseMode
         logger.warning(f"⚠️ Lỗi Markdown trong callback: {e}")
         logger.warning(f"📝 Text gây lỗi (độ dài {len(text)}): {text[:100]}...")
         
-        # Cách 1: Thử với parse_mode=None
+        # KIỂM TRA NẾU TEXT CHỨA #cat_ THÌ THAY THẾ
+        if "#cat_" in text:
+            logger.warning("🚫 Phát hiện #cat_ trong text, thay bằng message mặc định")
+            text = "❌ Có lỗi xảy ra, vui lòng thử lại sau."
+        
+        # Cách 1: Thử gửi không Markdown
         try:
             await query.edit_message_text(text, parse_mode=None, reply_markup=reply_markup)
             logger.info("✅ Đã sửa bằng cách gửi không Markdown")
@@ -56,7 +61,7 @@ async def safe_edit_message(query, text, reply_markup=None, parse_mode=ParseMode
         except Exception as e2:
             logger.warning(f"⚠️ Vẫn lỗi khi gửi không Markdown: {e2}")
         
-        # Cách 2: Gửi message lỗi đơn giản
+        # Cách 2: Gửi message mặc định
         try:
             await query.edit_message_text("❌ Có lỗi hiển thị, vui lòng thử lại sau.", parse_mode=None)
         except:
@@ -4234,7 +4239,11 @@ try:
             if query.data == "export_csv":
                 transactions = get_transaction_detail(user_id)
                 if not transactions:
-                    await query.edit_message_text("📭 Không có dữ liệu portfolio để xuất!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]))
+                    await query.edit_message_text(
+                        "📭 Không có dữ liệu portfolio để xuất!", 
+                        parse_mode=None,
+                        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]])
+                    )
                     return
                 
                 timestamp = get_vn_time().strftime('%Y%m%d_%H%M%S')
@@ -4270,7 +4279,11 @@ try:
                 incomes = get_recent_incomes(user_id, 1000)
                 
                 if not expenses and not incomes:
-                    await query.edit_message_text("📭 Không có dữ liệu chi tiêu để xuất!", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_expense")]]))
+                    await query.edit_message_text(
+                        "📭 Không có dữ liệu chi tiêu để xuất!", 
+                        parse_mode=None,
+                        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_expense")]])
+                    )
                     return
                 
                 timestamp = get_vn_time().strftime('%Y%m%d_%H%M%S')
@@ -4311,7 +4324,11 @@ try:
                 await query.edit_message_text(f"💰 *QUẢN LÝ CHI TIÊU*\n━━━━━━━━━━━━━━━━\n\n🕐 {format_vn_time()}", parse_mode=ParseMode.MARKDOWN, reply_markup=get_expense_menu_keyboard())
         except Exception as e:
             logger.error(f"❌ Lỗi export CSV: {e}", exc_info=True)
-            await query.edit_message_text(f"❌ Lỗi khi xuất CSV: {str(e)[:200]}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_main")]]))
+            await query.edit_message_text(
+                f"❌ Lỗi khi xuất CSV: {str(e)[:200]}", 
+                parse_mode=None,
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_main")]])
+            )
             
             try:
                 if 'filepath' in locals() and os.path.exists(filepath):
@@ -4822,6 +4839,9 @@ try:
             
             elif data.startswith("confirm_del_cat_"):
                 cat_id_str = data.replace("confirm_del_cat_", "")
+                # THÊM LOG
+                logger.info(f"🔍 Xử lý confirm_del_cat_ với ID: {cat_id_str}")
+                
                 try:
                     category_id = int(cat_id_str)
                 except ValueError:
@@ -4831,7 +4851,7 @@ try:
                 
                 owner_id = ctx.bot_data.get('effective_user_id', query.from_user.id)
                 
-                # Thông báo đang xử lý (không dùng Markdown)
+                # Thông báo đang xử lý - KHÔNG dùng Markdown
                 await query.edit_message_text("🔄 Đang xóa danh mục...", parse_mode=None)
                 
                 try:
@@ -4863,10 +4883,12 @@ try:
                         
                         safe_msg = escape_markdown(msg)
                     
+                    # THÊM LOG
+                    logger.info(f"📤 Gửi message kết quả: {safe_msg[:100]}...")
+                    
                     keyboard = [[InlineKeyboardButton("📋 Xem danh mục", callback_data="expense_categories"),
                                  InlineKeyboardButton("🔙 Về menu", callback_data="back_to_expense")]]
                     
-                    # Gửi message
                     await safe_edit_message(query, safe_msg, reply_markup=InlineKeyboardMarkup(keyboard))
                     
                 except Exception as e:
@@ -5281,6 +5303,7 @@ try:
                 await safe_edit_message(query, balance_msg, reply_markup=InlineKeyboardMarkup(keyboard))
                 
         except Exception as e:
+            # THÊM LOG CHI TIẾT
             logger.error(f"❌ LỖI CALLBACK: {e}", exc_info=True)
             logger.error(f"   • Data gây lỗi: {data}")
             logger.error(f"   • User: {query.from_user.id}")
@@ -5296,7 +5319,7 @@ try:
                     await query.message.reply_text("❌ Có lỗi xảy ra.")
                 except:
                     pass
-
+                    
     # ==================== WEBHOOK SETUP ====================
     async def setup_webhook():
         try:
