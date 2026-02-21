@@ -35,6 +35,26 @@ def escape_markdown(text):
     for char in special_chars:
         text = text.replace(char, f'\\{char}')
     return text
+# ==================== KIỂM TRA THƯ VIỆN ====================
+# Kiểm tra pyzipper cho tính năng xuất file có mật khẩu
+try:
+    import pyzipper
+    HAS_PYZIPPER = True
+    logger.info("✅ pyzipper installed - Support AES-256 encryption")
+    logger.info(f"   • pyzipper version: {pyzipper.__version__}")
+except ImportError:
+    HAS_PYZIPPER = False
+    logger.warning("⚠️ pyzipper NOT installed - Secure export feature disabled")
+    logger.warning("   • To enable: add 'pyzipper==0.3.6' to requirements.txt")
+
+# Kiểm tra cryptography (dự phòng nếu cần)
+try:
+    from cryptography.fernet import Fernet
+    HAS_CRYPTO = True
+    logger.info("✅ cryptography installed")
+except ImportError:
+    HAS_CRYPTO = False
+    pass
     
 # ==================== THÊM HÀM NÀY VÀO ĐÂY ====================
 async def safe_edit_message(query, text, reply_markup=None, parse_mode=ParseMode.MARKDOWN):
