@@ -4653,19 +4653,17 @@ try:
         if update.effective_user:
             await update_user_info_async(update.effective_user)
         
-        logger.info(f"Nhận tin nhắn từ user {update.effective_user.id} trong chat {update.effective_chat.type}: {update.message.text}")
-        
         text = update.message.text.strip()
         chat_type = update.effective_chat.type
+        user_id = update.effective_user.id
+        chat_id = update.effective_chat.id
+        
+        logger.info(f"📨 Tin nhắn từ user {user_id} trong {chat_type}: {text}")
         
         # TRONG GROUP: Kiểm tra quyền trước khi xử lý
         if chat_type in ['group', 'supergroup']:
-            user_id = update.effective_user.id
-            chat_id = update.effective_chat.id
-            
-            # Chỉ cho phép người có quyền 'view' mới được tương tác
             if not check_permission(chat_id, user_id, 'view'):
-                logger.info(f"User {user_id} không có quyền trong group, bỏ qua tin nhắn")
+                logger.info(f"⛔ User {user_id} không có quyền trong group, bỏ qua")
                 return
         
         # Xử lý tính toán nếu có
@@ -4682,26 +4680,37 @@ try:
             except:
                 return
         
-        # Xử lý các lệnh tắt
+        # Xử lý các lệnh tắt (tn, dm, ct, ds, bc)
         if text.startswith(('tn ', 'dm ', 'ct ', 'ds', 'bc', 'xoa chi ', 'xoa thu ')):
             await expense_shortcut_handler(update, ctx)
             return
         
-        # Xử lý menu
+        # Xử lý menu chính
         if text == "💰 ĐẦU TƯ COIN":
+            logger.info(f"💰 User {user_id} chọn menu ĐẦU TƯ COIN")
             await update.message.reply_text(
                 f"💰 *MENU ĐẦU TƯ COIN*\n━━━━━━━━━━━━━━━━\n\n🕐 {format_vn_time()}", 
                 parse_mode=ParseMode.MARKDOWN, 
-                reply_markup=get_invest_menu_keyboard(update.effective_user.id, update.effective_chat.id)
+                reply_markup=get_invest_menu_keyboard(user_id, chat_id)
             )
-        elif text == "💸 QUẢN LÝ CHI TIÊU":
+            return
+            
+        if text == "💸 QUẢN LÝ CHI TIÊU":
+            logger.info(f"💰 User {user_id} chọn menu QUẢN LÝ CHI TIÊU")
             await update.message.reply_text(
                 f"💰 *QUẢN LÝ CHI TIÊU*\n━━━━━━━━━━━━━━━━\n\n🕐 {format_vn_time()}", 
                 parse_mode=ParseMode.MARKDOWN, 
                 reply_markup=get_expense_menu_keyboard()
             )
-        elif text == "❓ HƯỚNG DẪN":
+            return
+            
+        if text == "❓ HƯỚNG DẪN":
+            logger.info(f"❓ User {user_id} chọn HƯỚNG DẪN")
             await help_command(update, ctx)
+            return
+        
+        # Nếu không khớp với bất kỳ điều kiện nào
+        logger.info(f"❓ Tin nhắn không xác định: {text}")
 
     async def export_csv_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
