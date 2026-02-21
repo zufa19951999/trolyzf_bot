@@ -1117,11 +1117,23 @@ try:
             current_user_id = update.effective_user.id
             chat_id = update.effective_chat.id
             
-            # PRIVATE CHAT: User tự quản lý dữ liệu của mình
+            # QUAN TRỌNG: XÓA TẤT CẢ DỮ LIỆU CŨ TRONG CONTEXT
+            # Đảm bảo không bị ảnh hưởng giữa các chat
+            if 'is_admin' in context.bot_data:
+                del context.bot_data['is_admin']
+            if 'effective_user_id' in context.bot_data:
+                del context.bot_data['effective_user_id']
+            
+            # PRIVATE CHAT: LUÔN TỰ QUẢN LÝ, KHÔNG LIÊN QUAN ĐẾN GROUP
             if chat_type == 'private':
                 effective_user_id = current_user_id
-                logger.info(f"💬 Private chat: user {current_user_id} tự quản lý")
-                
+                context.bot_data['effective_user_id'] = effective_user_id
+                context.bot_data['current_user_id'] = current_user_id
+                context.bot_data['chat_type'] = chat_type
+                context.bot_data['is_admin'] = False  # KHÔNG phải admin trong private
+                logger.info(f"💬 Private chat: user {current_user_id} tự quản lý (KHÔNG phải admin)")
+                return await func(update, context, *args, **kwargs)
+            
             # TRONG GROUP: Xác định owner và kiểm tra quyền
             elif chat_type in ['group', 'supergroup']:
                 owner_id = get_group_owner(chat_id)
@@ -1136,11 +1148,14 @@ try:
                     )
                     return
                 
-                # Kiểm tra quyền cơ bản (view)
-                if not check_permission(chat_id, current_user_id, 'view'):
-                    # Không chặn ở đây, để decorator xử lý
-                    # Nhưng vẫn cần xác định effective_user_id
+                # Kiểm tra quyền trong group
+                has_view_permission = check_permission(chat_id, current_user_id, 'view')
+                
+                if not has_view_permission:
+                    # Nếu không có quyền, vẫn set effective_user_id là chính họ
+                    # Decorator require_permission sẽ xử lý việc chặn
                     effective_user_id = current_user_id
+                    is_admin = False
                     logger.info(f"👤 User {current_user_id} chưa có quyền trong group {chat_id}")
                 else:
                     # Kiểm tra quyền admin
@@ -1155,16 +1170,23 @@ try:
                     else:
                         # User thường chỉ xem được dữ liệu của chính mình
                         effective_user_id = current_user_id
-                        logger.info(f"👤 User {current_user_id} tự quản lý dữ liệu riêng")
+                        logger.info(f"👤 User {current_user_id} tự quản lý dữ liệu riêng trong group")
+                
+                context.bot_data['effective_user_id'] = effective_user_id
+                context.bot_data['current_user_id'] = current_user_id
+                context.bot_data['chat_type'] = chat_type
+                context.bot_data['is_admin'] = is_admin if has_view_permission else False
+                
+                return await func(update, context, *args, **kwargs)
+            
+            # Các loại chat khác
             else:
-                # Các loại chat khác
-                effective_user_id = current_user_id
-            
-            context.bot_data['effective_user_id'] = effective_user_id
-            context.bot_data['current_user_id'] = current_user_id
-            context.bot_data['chat_type'] = chat_type
-            
-            return await func(update, context, *args, **kwargs)
+                context.bot_data['effective_user_id'] = current_user_id
+                context.bot_data['current_user_id'] = current_user_id
+                context.bot_data['chat_type'] = chat_type
+                context.bot_data['is_admin'] = False
+                return await func(update, context, *args, **kwargs)
+                
         return wrapper
     # ==================== HÀM ĐỊNH DẠNG ====================
     def fmt_price(p):
@@ -2950,7 +2972,7 @@ try:
                 tx_id, symbol, amount, price, date, total, tx_owner_id = tx
                 
                 # Kiểm tra quyền xem
-                if tx_owner_id != owner_id and not is_admin:
+                if tx_owner_id !=. target_user_id and not is_admin:
                     await update.message.reply_text("❌ Bạn không có quyền xem giao dịch này!")
                     return
                 
@@ -4852,6 +4874,22 @@ try:
             is_owner_user = (current_user_id == owner_id)
             
             logger.info(f"👤 User: {current_user_id}, Owner: {owner_id}, IsAdmin: {is_admin}, IsOwner: {is_owner_user}")
+
+            # ===== THÊM KIỂM TRA CHAT TYPE =====
+            chat_type = query.message.chat.type
+            
+            # Xác định target_user_id dựa trên chat type
+            if chat_type == 'private':
+                # Private chat: CHỈ xử lý dữ liệu của user hiện tại
+                target_user_id = current_user_id
+                logger.info(f"💬 PRIVATE CALLBACK: Xử lý cho user {target_user_id} (cá nhân)")
+            else:
+                # Group chat: Xử lý dữ liệu của owner (nếu có quyền)
+                if not is_owner_user and not is_admin:
+                    await safe_edit_message(query, "❌ Bạn không có quyền thực hiện thao tác này trong group!")
+                    return
+                target_user_id = owner_id
+                logger.info(f"👥 GROUP CALLBACK: Xử lý cho owner {target_user_id}")
             
             # ===========================================
             # NHÓM 1: XỬ LÝ XÓA DANH MỤC (ƯU TIÊN CAO NHẤT)
@@ -4962,10 +5000,12 @@ try:
                     
                     # Chỉ cho phép xóa nếu là chủ sở hữu hoặc admin
                     can_delete = False
-                    if tx_owner_id == owner_id:
+                    can_delete = False
+                    if tx_owner_id == target_user_id:
                         can_delete = True
-                    elif is_admin:
+                    elif is_admin and chat_type != 'private':  # Trong group mới được admin xóa
                         can_delete = True
+
                     
                     if not can_delete:
                         conn.close()
@@ -5002,12 +5042,21 @@ try:
             if data == "edit_transactions":
                 logger.info("📋 Hiển thị danh sách sửa/xóa giao dịch")
                 
-                # Chỉ cho phép chủ sở hữu hoặc admin xem/sửa giao dịch
-                if not is_owner_user and not is_admin:
-                    await safe_edit_message(query, "❌ Bạn không có quyền quản lý giao dịch!")
-                    return
+                # QUAN TRỌNG: Kiểm tra chat type
+                chat_type = query.message.chat.type
                 
-                transactions = get_transaction_detail(owner_id)
+                # Nếu là private chat, chỉ quản lý dữ liệu của chính mình
+                if chat_type == 'private':
+                    target_user_id = current_user_id
+                    logger.info(f"💬 Private chat: quản lý giao dịch cá nhân {target_user_id}")
+                else:
+                    # Trong group, chỉ cho phép chủ sở hữu hoặc admin
+                    if not is_owner_user and not is_admin:
+                        await safe_edit_message(query, "❌ Bạn không có quyền quản lý giao dịch!")
+                        return
+                    target_user_id = owner_id
+                
+                transactions = get_transaction_detail(target_user_id)
                 
                 if not transactions:
                     msg = f"📭 Không có giao dịch!\n\n🕐 {format_vn_time()}"
@@ -5085,14 +5134,23 @@ try:
             # ===========================================
             
             if data == "show_profit":
-                logger.info("📈 Hiển thị lợi nhuận của chủ sở hữu")
+                logger.info("📈 Hiển thị lợi nhuận")
                 
-                # Chỉ cho phép chủ sở hữu hoặc admin xem lợi nhuận
-                if not is_owner_user and not is_admin:
-                    await safe_edit_message(query, "❌ Bạn không có quyền xem lợi nhuận!")
-                    return
+                # QUAN TRỌNG: Kiểm tra chat type
+                chat_type = query.message.chat.type
                 
-                transactions = get_transaction_detail(owner_id)
+                # Nếu là private chat, chỉ xem dữ liệu của chính mình
+                if chat_type == 'private':
+                    target_user_id = current_user_id
+                    logger.info(f"💬 Private chat: xem lợi nhuận cá nhân {target_user_id}")
+                else:
+                    # Trong group, admin mới được xem dữ liệu chủ sở hữu
+                    if not is_owner_user and not is_admin:
+                        await safe_edit_message(query, "❌ Bạn không có quyền xem lợi nhuận!")
+                        return
+                    target_user_id = owner_id
+                
+                transactions = get_transaction_detail(target_user_id)
                 
                 if not transactions:
                     msg = f"📭 Danh mục trống!\n\n🕐 {format_vn_time()}"
@@ -5153,16 +5211,23 @@ try:
             # ===========================================
             
             if data == "show_stats":
-                logger.info("📊 Hiển thị thống kê của chủ sở hữu")
+                logger.info("📊 Hiển thị thống kê")
                 
-                # Chỉ cho phép chủ sở hữu hoặc admin xem thống kê
-                if not is_owner_user and not is_admin:
-                    await safe_edit_message(query, "❌ Bạn không có quyền xem thống kê!")
-                    return
+                # QUAN TRỌNG: Kiểm tra chat type
+                chat_type = query.message.chat.type
                 
-                await query.edit_message_text("🔄 Đang tính toán thống kê...")
+                # Nếu là private chat, chỉ xem dữ liệu của chính mình
+                if chat_type == 'private':
+                    target_user_id = current_user_id
+                    logger.info(f"💬 Private chat: xem thống kê cá nhân {target_user_id}")
+                else:
+                    # Trong group, admin mới được xem dữ liệu chủ sở hữu
+                    if not is_owner_user and not is_admin:
+                        await safe_edit_message(query, "❌ Bạn không có quyền xem thống kê!")
+                        return
+                    target_user_id = owner_id
                 
-                stats = get_portfolio_stats(owner_id)
+                stats = get_portfolio_stats(target_user_id)
                 
                 if not stats:
                     msg = f"📭 Danh mục trống!"
@@ -5313,7 +5378,7 @@ try:
                 tx_id, symbol, amount, price, date, total, tx_owner_id = tx
                 
                 # Kiểm tra quyền xem/sửa - chỉ cho phép chủ sở hữu hoặc admin
-                if tx_owner_id != owner_id and not is_admin:
+                if tx_owner_id !=. target_user_id and not is_admin:
                     await safe_edit_message(query, "❌ Bạn không có quyền xem giao dịch này!")
                     return
                 
@@ -5377,9 +5442,10 @@ try:
                 
                 # Kiểm tra quyền xóa - chỉ cho phép chủ sở hữu hoặc admin
                 can_delete = False
-                if tx_owner_id == owner_id:
+                can_delete = False
+                if tx_owner_id == target_user_id:
                     can_delete = True
-                elif is_admin:
+                elif is_admin and chat_type != 'private':  # Trong group mới được admin xóa
                     can_delete = True
                 
                 if not can_delete:
