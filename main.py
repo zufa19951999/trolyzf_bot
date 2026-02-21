@@ -4695,7 +4695,7 @@ try:
             )
             return
             
-        if text == "💸 QUẢN LÝ CHI TIÊU":
+        if text == "💵 QUẢN LÝ CHI TIÊU":
             logger.info(f"💰 User {user_id} chọn menu QUẢN LÝ CHI TIÊU")
             await update.message.reply_text(
                 f"💰 *QUẢN LÝ CHI TIÊU*\n━━━━━━━━━━━━━━━━\n\n🕐 {format_vn_time()}", 
@@ -4704,7 +4704,7 @@ try:
             )
             return
             
-        if text == "❓ HƯỚNG DẪN":
+        if text == "🤔 HƯỚNG DẪN":
             logger.info(f"❓ User {user_id} chọn HƯỚNG DẪN")
             await help_command(update, ctx)
             return
