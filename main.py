@@ -329,14 +329,19 @@ def require_permission(permission_type):
             if is_owner(user_id):
                 return await func(update, context, *args, **kwargs)
             
-            # Trong group, KIỂM TRA NGHIÊM NGẶT
+            # PRIVATE CHAT: Ai cũng dùng được
+            if chat_type == 'private':
+                return await func(update, context, *args, **kwargs)
+            
+            # TRONG GROUP: Kiểm tra quyền nghiêm ngặt
             if chat_type in ['group', 'supergroup']:
                 # Kiểm tra xem user có được cấp quyền không
                 if not check_permission(chat_id, user_id, permission_type):
                     await update.message.reply_text(
-                        "❌ *KHÔNG CÓ QUYỀN SỬ DỤNG BOT*\n\n"
+                        "❌ *KHÔNG CÓ QUYỀN SỬ DỤNG BOT TRONG NHÓM*\n\n"
                         "Bạn chưa được cấp quyền sử dụng bot trong nhóm này.\n"
                         "Vui lòng liên hệ chủ sở hữu nhóm để được cấp quyền.\n\n"
+                        "💡 Trong chat riêng với bot, bạn vẫn có thể sử dụng bình thường.\n\n"
                         f"🕐 {format_vn_time()}", 
                         parse_mode=ParseMode.MARKDOWN
                     )
@@ -345,9 +350,8 @@ def require_permission(permission_type):
                 # Nếu có quyền, cho phép sử dụng
                 return await func(update, context, *args, **kwargs)
             
-            # Trong private chat, ai cũng dùng được
-            else:
-                return await func(update, context, *args, **kwargs)
+            # Các loại chat khác (channel, v.v.)
+            return await func(update, context, *args, **kwargs)
             
         return wrapper
     return decorator
@@ -360,25 +364,27 @@ def require_group_permission(permission_type):
             chat_id = update.effective_chat.id
             chat_type = update.effective_chat.type
             
-            # Cho phép owner luôn có quyền
+            # Owner bot luôn có quyền
             if is_owner(user_id):
                 return await func(update, context, *args, **kwargs)
             
-            # Chỉ kiểm tra trong group
-            if chat_type in ['group', 'supergroup']:
-                # KIỂM TRA NGHIÊM NGẶT
-                if not check_permission(chat_id, user_id, permission_type):
-                    await update.message.reply_text(
-                        "❌ *KHÔNG CÓ QUYỀN SỬ DỤNG*\n\n"
-                        "Bạn không có quyền sử dụng lệnh này trong nhóm.\n\n"
-                        f"🕐 {format_vn_time()}",
-                        parse_mode=ParseMode.MARKDOWN
-                    )
-                    return
-                return await func(update, context, *args, **kwargs)
-            else:
+            # Lệnh này chỉ dùng trong group
+            if chat_type not in ['group', 'supergroup']:
                 await update.message.reply_text("❌ Lệnh này chỉ dùng trong nhóm!")
                 return
+            
+            # Trong group, kiểm tra quyền
+            if not check_permission(chat_id, user_id, permission_type):
+                await update.message.reply_text(
+                    "❌ *KHÔNG CÓ QUYỀN THỰC HIỆN LỆNH NÀY*\n\n"
+                    "Bạn không có quyền sử dụng lệnh này trong nhóm.\n\n"
+                    f"🕐 {format_vn_time()}",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                return
+            
+            return await func(update, context, *args, **kwargs)
+            
         return wrapper
     return decorator
     
@@ -1111,8 +1117,13 @@ try:
             current_user_id = update.effective_user.id
             chat_id = update.effective_chat.id
             
-            # Xác định owner_id (chủ sở hữu dữ liệu)
-            if chat_type in ['group', 'supergroup']:
+            # PRIVATE CHAT: User tự quản lý dữ liệu của mình
+            if chat_type == 'private':
+                effective_user_id = current_user_id
+                logger.info(f"💬 Private chat: user {current_user_id} tự quản lý")
+                
+            # TRONG GROUP: Xác định owner và kiểm tra quyền
+            elif chat_type in ['group', 'supergroup']:
                 owner_id = get_group_owner(chat_id)
                 
                 if not owner_id:
@@ -1125,37 +1136,33 @@ try:
                     )
                     return
                 
-                # QUAN TRỌNG: Kiểm tra quyền cơ bản (view)
+                # Kiểm tra quyền cơ bản (view)
                 if not check_permission(chat_id, current_user_id, 'view'):
-                    # Nếu không có quyền view, chặn tất cả
-                    await update.message.reply_text(
-                        "❌ *KHÔNG CÓ QUYỀN SỬ DỤNG BOT*\n\n"
-                        "Bạn chưa được cấp quyền sử dụng bot trong nhóm này.\n"
-                        "Vui lòng liên hệ chủ sở hữu nhóm để được cấp quyền.\n\n"
-                        f"🕐 {format_vn_time()}",
-                        parse_mode=ParseMode.MARKDOWN
-                    )
-                    return
-                
-                # Kiểm tra quyền admin
-                is_admin = check_permission(chat_id, current_user_id, 'edit') or \
-                          check_permission(chat_id, current_user_id, 'delete') or \
-                          check_permission(chat_id, current_user_id, 'manage')
-                
-                if is_admin:
-                    # Admin có quyền thao tác trên dữ liệu của chủ sở hữu
-                    effective_user_id = owner_id
-                    logger.info(f"👑 Admin {current_user_id} đang thao tác trên dữ liệu của owner {owner_id}")
-                else:
-                    # User thường chỉ xem được dữ liệu của chính mình (nếu có)
+                    # Không chặn ở đây, để decorator xử lý
+                    # Nhưng vẫn cần xác định effective_user_id
                     effective_user_id = current_user_id
-                    logger.info(f"👤 User {current_user_id} tự quản lý dữ liệu riêng")
+                    logger.info(f"👤 User {current_user_id} chưa có quyền trong group {chat_id}")
+                else:
+                    # Kiểm tra quyền admin
+                    is_admin = check_permission(chat_id, current_user_id, 'edit') or \
+                              check_permission(chat_id, current_user_id, 'delete') or \
+                              check_permission(chat_id, current_user_id, 'manage')
+                    
+                    if is_admin:
+                        # Admin có quyền thao tác trên dữ liệu của chủ sở hữu
+                        effective_user_id = owner_id
+                        logger.info(f"👑 Admin {current_user_id} đang thao tác trên dữ liệu của owner {owner_id}")
+                    else:
+                        # User thường chỉ xem được dữ liệu của chính mình
+                        effective_user_id = current_user_id
+                        logger.info(f"👤 User {current_user_id} tự quản lý dữ liệu riêng")
             else:
-                # Private chat: user tự quản lý
+                # Các loại chat khác
                 effective_user_id = current_user_id
             
             context.bot_data['effective_user_id'] = effective_user_id
             context.bot_data['current_user_id'] = current_user_id
+            context.bot_data['chat_type'] = chat_type
             
             return await func(update, context, *args, **kwargs)
         return wrapper
@@ -1859,9 +1866,12 @@ try:
              InlineKeyboardButton("➖ Bán coin", callback_data="show_sell")]
         ]
         
+        # Chỉ hiển thị nút ADMIN nếu đang ở trong group và có quyền
         if group_id and user_id:
             try:
-                if check_permission(group_id, user_id, 'view'):
+                # Kiểm tra nếu đang ở trong group
+                chat_type = ctx.bot_data.get('chat_type') if hasattr(ctx, 'bot_data') else None
+                if chat_type in ['group', 'supergroup'] and check_permission(group_id, user_id, 'view'):
                     keyboard.append([InlineKeyboardButton("👑 ADMIN", callback_data="admin_panel")])
             except:
                 pass
@@ -2701,7 +2711,7 @@ try:
         await update.message.reply_text(help_msg, parse_mode=ParseMode.MARKDOWN)
 
     @auto_update_user
-    @rate_limit(30)
+    @require_permission('view')
     async def usdt_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         msg = await update.message.reply_text("🔄 Đang tra cứu...")
         rate_data = get_usdt_vnd_rate()
@@ -4647,18 +4657,17 @@ try:
         
         text = update.message.text.strip()
         chat_type = update.effective_chat.type
-
-        # THÊM: Kiểm tra quyền trong group
+        
+        # TRONG GROUP: Kiểm tra quyền trước khi xử lý
         if chat_type in ['group', 'supergroup']:
             user_id = update.effective_user.id
             chat_id = update.effective_chat.id
             
             # Chỉ cho phép người có quyền 'view' mới được tương tác
             if not check_permission(chat_id, user_id, 'view'):
-                # Bỏ qua tin nhắn, không phản hồi gì
-                logger.info(f"User {user_id} không có quyền, bỏ qua tin nhắn")
+                logger.info(f"User {user_id} không có quyền trong group, bỏ qua tin nhắn")
                 return
-                
+        
         # Xử lý tính toán nếu có
         if re.search(r'[\+\-\*\/]', text) and re.match(r'^[\d\s\+\-\*\/\.\(\)]+$', text):
             try:
@@ -4672,28 +4681,26 @@ try:
                 return
             except:
                 return
-
+        
         # Xử lý các lệnh tắt
         if text.startswith(('tn ', 'dm ', 'ct ', 'ds', 'bc', 'xoa chi ', 'xoa thu ')):
-            if chat_type in ['group', 'supergroup']:
-                user_id = update.effective_user.id
-                chat_id = update.effective_chat.id
-                effective_user_id = ctx.bot_data.get('effective_user_id', user_id)
-                
-                if user_id != effective_user_id:
-                    if not check_permission(chat_id, user_id, 'view'):
-                        await update.message.reply_text("❌ Bạn không có quyền thêm dữ liệu trong group này!\nVui lòng liên hệ chủ sở hữu để được cấp quyền.", parse_mode=ParseMode.MARKDOWN)
-                        return
-            
             await expense_shortcut_handler(update, ctx)
             return
-
+        
         # Xử lý menu
         if text == "💰 ĐẦU TƯ COIN":
-            await update.message.reply_text(f"💰 *MENU ĐẦU TƯ COIN*\n━━━━━━━━━━━━━━━━\n\n🕐 {format_vn_time()}", parse_mode=ParseMode.MARKDOWN, reply_markup=get_invest_menu_keyboard(update.effective_user.id, update.effective_chat.id))
-        elif text == "💵 QUẢN LÝ CHI TIÊU":
-            await update.message.reply_text(f"💰 *QUẢN LÝ CHI TIÊU*\n━━━━━━━━━━━━━━━━\n\n🕐 {format_vn_time()}", parse_mode=ParseMode.MARKDOWN, reply_markup=get_expense_menu_keyboard())
-        elif text == "🤔 HƯỚNG DẪN":
+            await update.message.reply_text(
+                f"💰 *MENU ĐẦU TƯ COIN*\n━━━━━━━━━━━━━━━━\n\n🕐 {format_vn_time()}", 
+                parse_mode=ParseMode.MARKDOWN, 
+                reply_markup=get_invest_menu_keyboard(update.effective_user.id, update.effective_chat.id)
+            )
+        elif text == "💸 QUẢN LÝ CHI TIÊU":
+            await update.message.reply_text(
+                f"💰 *QUẢN LÝ CHI TIÊU*\n━━━━━━━━━━━━━━━━\n\n🕐 {format_vn_time()}", 
+                parse_mode=ParseMode.MARKDOWN, 
+                reply_markup=get_expense_menu_keyboard()
+            )
+        elif text == "❓ HƯỚNG DẪN":
             await help_command(update, ctx)
 
     async def export_csv_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
