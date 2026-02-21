@@ -5273,7 +5273,98 @@ try:
             # NHÓM 4: XỬ LÝ XEM PORTFOLIO - CHỈ XEM CỦA CHỦ SỞ HỮU
             # ===========================================
             
-            #Trống
+            if data == "show_portfolio":
+                logger.info("📊 Hiển thị portfolio")
+                
+                # Xác định user_id cần xem
+                chat_type = query.message.chat.type
+                current_user_id = query.from_user.id
+                
+                if chat_type == 'private':
+                    target_user_id = current_user_id
+                    logger.info(f"💬 Private: xem portfolio cá nhân {target_user_id}")
+                else:
+                    # Trong group, chỉ cho xem portfolio của chủ sở hữu nếu có quyền
+                    owner_id = ctx.bot_data.get('group_owner_id', get_group_owner(chat_id))
+                    is_admin = ctx.bot_data.get('is_admin', False)
+                    is_owner = (current_user_id == owner_id)
+                    
+                    if not check_permission(chat_id, current_user_id, 'view'):
+                        await safe_edit_message(query, "❌ Bạn không có quyền xem portfolio!")
+                        return
+                    
+                    if is_admin or is_owner:
+                        target_user_id = owner_id
+                        logger.info(f"👥 Group: admin xem portfolio của owner {target_user_id}")
+                    else:
+                        target_user_id = current_user_id
+                        logger.info(f"👥 Group: user xem portfolio cá nhân {target_user_id}")
+                
+                # Lấy dữ liệu portfolio
+                portfolio_data = get_portfolio(target_user_id)
+                
+                if not portfolio_data:
+                    msg = f"📭 Danh mục trống!\n\n🕐 {format_vn_time()}"
+                    keyboard = [[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
+                    await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                    return
+                
+                # Lấy tất cả symbols để fetch giá
+                symbols = list(set([row[0] for row in portfolio_data]))
+                prices = get_prices_batch(symbols)
+                
+                # Tính toán tổng hợp theo từng coin
+                summary = {}
+                total_invest = 0
+                total_value = 0
+                
+                for row in portfolio_data:
+                    symbol, amount, price, date, cost = row
+                    if symbol not in summary:
+                        summary[symbol] = {'amount': 0, 'cost': 0}
+                    summary[symbol]['amount'] += amount
+                    summary[symbol]['cost'] += cost
+                    total_invest += cost
+                
+                # Lấy tên hiển thị
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                c.execute("SELECT username, first_name FROM users WHERE user_id = ?", (target_user_id,))
+                user_info = c.fetchone()
+                conn.close()
+                
+                display_name = user_info[0] if user_info and user_info[0] else (user_info[1] if user_info else f"User {target_user_id}")
+                safe_display_name = escape_markdown(display_name)
+                
+                msg = f"📊 *DANH MỤC CỦA {safe_display_name}*\n━━━━━━━━━━━━━━━━\n\n"
+                
+                for symbol, data in summary.items():
+                    price_data = prices.get(symbol)
+                    if price_data:
+                        current = data['amount'] * price_data['p']
+                        profit = current - data['cost']
+                        profit_percent = (profit / data['cost']) * 100 if data['cost'] > 0 else 0
+                        total_value += current
+                        
+                        msg += f"*{symbol}*\n"
+                        msg += f"📊 SL: `{data['amount']:.4f}`\n"
+                        msg += f"💰 TB: `{fmt_price(data['cost']/data['amount'])}`\n"
+                        msg += f"💎 TT: `{fmt_price(current)}`\n"
+                        msg += f"{'✅' if profit>=0 else '❌'} LN: `{fmt_price(profit)}` ({profit_percent:+.2f}%)\n\n"
+                
+                total_profit = total_value - total_invest
+                total_profit_percent = (total_profit / total_invest) * 100 if total_invest > 0 else 0
+                
+                msg += "━━━━━━━━━━━━━━━━\n"
+                msg += f"💵 Vốn: `{fmt_price(total_invest)}`\n"
+                msg += f"💰 GT: `{fmt_price(total_value)}`\n"
+                msg += f"{'✅' if total_profit>=0 else '❌'} Tổng LN: `{fmt_price(total_profit)}` ({total_profit_percent:+.2f}%)\n\n"
+                msg += f"🕐 {format_vn_time()}"
+                
+                keyboard = [[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
+                
+                await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                return
             
             # ===========================================
             # NHÓM 5: XỬ LÝ XEM LỢI NHUẬN - CHỈ XEM CỦA CHỦ SỞ HỮU
