@@ -1943,7 +1943,7 @@ try:
             [InlineKeyboardButton("📅 HÔM NAY", callback_data="expense_today"),
              InlineKeyboardButton("📅 THÁNG NÀY", callback_data="expense_month")],
             [InlineKeyboardButton("🔄 GẦN ĐÂY", callback_data="expense_recent"),
-             InlineKeyboardButton("📥 XUẤT CSV", callback_data="expense_export")],
+             InlineKeyboardButton("🔐 Xuất báo cáo", callback_data="export_expense_menu")],  # <-- NÚT DUY NHẤT
             [InlineKeyboardButton("🔙 VỀ MENU CHÍNH", callback_data="back_to_main")]
         ]
         return InlineKeyboardMarkup(keyboard)
@@ -3711,6 +3711,741 @@ try:
             
         except Exception as e:
             logger.error(f"❌ Lỗi tạo CSV chi tiết: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def generate_detailed_expense_csv(user_id):
+        """
+        Tạo file CSV chi tiết cho quản lý thu chi
+        Bao gồm: thu nhập, chi tiêu, phân tích danh mục, cân đối
+        """
+        try:
+            import csv
+            import io
+            from datetime import datetime
+            
+            output = io.StringIO()
+            writer = csv.writer(output)
+            
+            # =========================================
+            # 1. THÔNG TIN TỔNG QUAN
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['BÁO CÁO THU CHI CHI TIẾT'])
+            writer.writerow(['='*80])
+            writer.writerow(['Ngày xuất:', format_vn_time()])
+            writer.writerow(['User ID:', user_id])
+            writer.writerow([])
+            
+            # Lấy dữ liệu
+            incomes = get_recent_incomes(user_id, 5000)  # Lấy tối đa 5000 giao dịch
+            expenses = get_recent_expenses(user_id, 5000)
+            
+            if not incomes and not expenses:
+                writer.writerow(['KHÔNG CÓ DỮ LIỆU'])
+                return output.getvalue()
+            
+            # =========================================
+            # 2. DANH SÁCH THU NHẬP
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['DANH SÁCH THU NHẬP'])
+            writer.writerow(['='*80])
+            
+            if incomes:
+                writer.writerow(['ID', 'Ngày', 'Nguồn', 'Số tiền', 'Loại tiền', 'Ghi chú'])
+                total_income = {}
+                income_by_month = {}
+                income_by_source = {}
+                
+                for inc in incomes:
+                    inc_id, amount, source, note, date, currency = inc
+                    writer.writerow([inc_id, date, source, f"{amount:,.0f}", currency, note or ''])
+                    
+                    # Tổng theo loại tiền
+                    if currency not in total_income:
+                        total_income[currency] = 0
+                    total_income[currency] += amount
+                    
+                    # Tổng theo tháng
+                    month = date[:7]  # YYYY-MM
+                    if month not in income_by_month:
+                        income_by_month[month] = {}
+                    if currency not in income_by_month[month]:
+                        income_by_month[month][currency] = 0
+                    income_by_month[month][currency] += amount
+                    
+                    # Tổng theo nguồn
+                    key = f"{source}_{currency}"
+                    if key not in income_by_source:
+                        income_by_source[key] = {'source': source, 'currency': currency, 'total': 0, 'count': 0}
+                    income_by_source[key]['total'] += amount
+                    income_by_source[key]['count'] += 1
+                
+                writer.writerow([])
+                writer.writerow(['TỔNG THU THEO LOẠI TIỀN:'])
+                for currency, total in total_income.items():
+                    writer.writerow([currency, f"{total:,.0f}"])
+                
+                writer.writerow([])
+                writer.writerow(['THU NHẬP THEO NGUỒN:'])
+                writer.writerow(['Nguồn', 'Loại tiền', 'Tổng', 'Số lần'])
+                for key, data in income_by_source.items():
+                    writer.writerow([data['source'], data['currency'], f"{data['total']:,.0f}", data['count']])
+            else:
+                writer.writerow(['Không có dữ liệu thu nhập'])
+            
+            writer.writerow([])
+            
+            # =========================================
+            # 3. DANH SÁCH CHI TIÊU
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['DANH SÁCH CHI TIÊU'])
+            writer.writerow(['='*80])
+            
+            if expenses:
+                writer.writerow(['ID', 'Ngày', 'Danh mục', 'Số tiền', 'Loại tiền', 'Ghi chú'])
+                total_expense = {}
+                expense_by_month = {}
+                category_stats = {}
+                
+                for exp in expenses:
+                    exp_id, cat_name, amount, note, date, currency = exp
+                    writer.writerow([exp_id, date, cat_name, f"{amount:,.0f}", currency, note or ''])
+                    
+                    # Tổng theo loại tiền
+                    if currency not in total_expense:
+                        total_expense[currency] = 0
+                    total_expense[currency] += amount
+                    
+                    # Tổng theo tháng
+                    month = date[:7]
+                    if month not in expense_by_month:
+                        expense_by_month[month] = {}
+                    if currency not in expense_by_month[month]:
+                        expense_by_month[month][currency] = 0
+                    expense_by_month[month][currency] += amount
+                    
+                    # Thống kê theo danh mục
+                    key = f"{cat_name}_{currency}"
+                    if key not in category_stats:
+                        # Lấy budget từ database
+                        conn = sqlite3.connect(DB_PATH)
+                        c = conn.cursor()
+                        c.execute('''SELECT budget FROM expense_categories WHERE name = ? AND user_id = ?''', (cat_name, user_id))
+                        budget = c.fetchone()
+                        conn.close()
+                        
+                        category_stats[key] = {
+                            'category': cat_name,
+                            'currency': currency,
+                            'total': 0,
+                            'count': 0,
+                            'budget': budget[0] if budget else 0
+                        }
+                    category_stats[key]['total'] += amount
+                    category_stats[key]['count'] += 1
+                
+                writer.writerow([])
+                writer.writerow(['TỔNG CHI THEO LOẠI TIỀN:'])
+                for currency, total in total_expense.items():
+                    writer.writerow([currency, f"{total:,.0f}"])
+            else:
+                writer.writerow(['Không có dữ liệu chi tiêu'])
+            
+            writer.writerow([])
+            
+            # =========================================
+            # 4. PHÂN TÍCH CHI TIÊU THEO DANH MỤC
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['PHÂN TÍCH CHI TIÊU THEO DANH MỤC'])
+            writer.writerow(['='*80])
+            
+            if category_stats:
+                writer.writerow(['Danh mục', 'Loại tiền', 'Tổng chi', 'Số lần', 'Budget', '% Budget', 'Đánh giá'])
+                
+                # Sắp xếp theo tổng chi giảm dần
+                sorted_cats = sorted(category_stats.items(), key=lambda x: x[1]['total'], reverse=True)
+                
+                for key, data in sorted_cats:
+                    percent = (data['total'] / data['budget'] * 100) if data['budget'] > 0 else 0
+                    
+                    if data['budget'] > 0:
+                        if percent > 100:
+                            status = "🔴 VƯỢT BUDGET"
+                        elif percent > 80:
+                            status = "⚠️ GẦN HẾT"
+                        else:
+                            status = "✅ TRONG BUDGET"
+                    else:
+                        status = "📊 KHÔNG BUDGET"
+                    
+                    writer.writerow([
+                        data['category'],
+                        data['currency'],
+                        f"{data['total']:,.0f}",
+                        data['count'],
+                        f"{data['budget']:,.0f}",
+                        f"{percent:.1f}%",
+                        status
+                    ])
+            else:
+                writer.writerow(['Không có dữ liệu chi tiêu'])
+            
+            writer.writerow([])
+            
+            # =========================================
+            # 5. CÂN ĐỐI THU CHI
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['CÂN ĐỐI THU CHI'])
+            writer.writerow(['='*80])
+            
+            all_currencies = set(list(total_income.keys()) + list(total_expense.keys()))
+            
+            writer.writerow(['Loại tiền', 'Tổng thu', 'Tổng chi', 'Cân đối', 'Đánh giá'])
+            for currency in sorted(all_currencies):
+                income = total_income.get(currency, 0)
+                expense = total_expense.get(currency, 0)
+                balance = income - expense
+                
+                if balance > 0:
+                    eval_ = "✅ TIẾT KIỆM"
+                elif balance < 0:
+                    eval_ = "❌ THÂM HỤT"
+                else:
+                    eval_ = "➖ CÂN BẰNG"
+                
+                writer.writerow([
+                    currency,
+                    f"{income:,.0f}",
+                    f"{expense:,.0f}",
+                    f"{balance:,.0f}",
+                    eval_
+                ])
+            
+            writer.writerow([])
+            
+            # =========================================
+            # 6. PHÂN TÍCH THEO THÁNG
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['PHÂN TÍCH THEO THÁNG'])
+            writer.writerow(['='*80])
+            
+            all_months = sorted(set(list(income_by_month.keys()) + list(expense_by_month.keys())))
+            
+            writer.writerow(['Tháng', 'Thu (VND)', 'Chi (VND)', 'Cân đối', 'Thu (USD)', 'Chi (USD)', 'Cân đối'])
+            
+            for month in all_months:
+                # VND
+                income_vnd = income_by_month.get(month, {}).get('VND', 0)
+                expense_vnd = expense_by_month.get(month, {}).get('VND', 0)
+                balance_vnd = income_vnd - expense_vnd
+                
+                # USD
+                income_usd = income_by_month.get(month, {}).get('USD', 0)
+                expense_usd = expense_by_month.get(month, {}).get('USD', 0)
+                balance_usd = income_usd - expense_usd
+                
+                # USDT (nếu có)
+                income_usdt = income_by_month.get(month, {}).get('USDT', 0)
+                expense_usdt = expense_by_month.get(month, {}).get('USDT', 0)
+                balance_usdt = income_usdt - expense_usdt
+                
+                # KHR (nếu có)
+                income_khr = income_by_month.get(month, {}).get('KHR', 0)
+                expense_khr = expense_by_month.get(month, {}).get('KHR', 0)
+                balance_khr = income_khr - expense_khr
+                
+                # LKR (nếu có)
+                income_lkr = income_by_month.get(month, {}).get('LKR', 0)
+                expense_lkr = expense_by_month.get(month, {}).get('LKR', 0)
+                balance_lkr = income_lkr - expense_lkr
+                
+                # Chỉ hiển thị các cột có dữ liệu
+                row = [month, f"{income_vnd:,.0f}", f"{expense_vnd:,.0f}", f"{balance_vnd:,.0f}"]
+                
+                if income_usd > 0 or expense_usd > 0:
+                    row.extend([f"{income_usd:,.2f}", f"{expense_usd:,.2f}", f"{balance_usd:,.2f}"])
+                else:
+                    row.extend(['0', '0', '0'])
+                    
+                if income_usdt > 0 or expense_usdt > 0:
+                    row.extend([f"{income_usdt:,.2f}", f"{expense_usdt:,.2f}", f"{balance_usdt:,.2f}"])
+                
+                if income_khr > 0 or expense_khr > 0:
+                    row.extend([f"{income_khr:,.0f}", f"{expense_khr:,.0f}", f"{balance_khr:,.0f}"])
+                
+                if income_lkr > 0 or expense_lkr > 0:
+                    row.extend([f"{income_lkr:,.0f}", f"{expense_lkr:,.0f}", f"{balance_lkr:,.0f}"])
+                
+                writer.writerow(row)
+            
+            writer.writerow([])
+            
+            # =========================================
+            # 7. THỐNG KÊ TỔNG HỢP
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['THỐNG KÊ TỔNG HỢP'])
+            writer.writerow(['='*80])
+            
+            total_income_all = sum(total_income.values())
+            total_expense_all = sum(total_expense.values())
+            
+            writer.writerow(['Tổng số khoản thu:', len(incomes)])
+            writer.writerow(['Tổng số khoản chi:', len(expenses)])
+            writer.writerow(['Tổng thu (quy đổi VND):', f"{total_income_all:,.0f} VND"])
+            writer.writerow(['Tổng chi (quy đổi VND):', f"{total_expense_all:,.0f} VND"])
+            writer.writerow(['Tổng cân đối:', f"{total_income_all - total_expense_all:,.0f} VND"])
+            
+            # Trung bình chi tiêu
+            if expenses:
+                avg_expense = total_expense_all / len(expenses)
+                writer.writerow(['Trung bình mỗi khoản chi:', f"{avg_expense:,.0f} VND"])
+            
+            # Tỷ lệ chi theo danh mục
+            if total_expense_all > 0 and category_stats:
+                writer.writerow([])
+                writer.writerow(['TỶ LỆ CHI THEO DANH MỤC:'])
+                
+                for key, data in sorted_cats[:5]:  # Top 5 danh mục chi nhiều nhất
+                    percent = (data['total'] / total_expense_all * 100)
+                    writer.writerow([f"• {data['category']}: {percent:.1f}% ({data['total']:,.0f} {data['currency']})"])
+            
+            writer.writerow([])
+            
+            # =========================================
+            # 8. ĐÁNH GIÁ & KHUYẾN NGHỊ
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['ĐÁNH GIÁ & KHUYẾN NGHỊ'])
+            writer.writerow(['='*80])
+            
+            total_balance = total_income_all - total_expense_all
+            
+            # Đánh giá tổng quan
+            if total_balance > 0:
+                savings_rate = (total_balance / total_income_all * 100) if total_income_all > 0 else 0
+                if savings_rate > 30:
+                    rating = "🚀 XUẤT SẮC - Tiết kiệm rất tốt"
+                elif savings_rate > 15:
+                    rating = "✅ TỐT - Có quỹ tiết kiệm"
+                else:
+                    rating = "📊 ỔN ĐỊNH - Cân đối tốt"
+            else:
+                deficit_rate = (abs(total_balance) / total_expense_all * 100) if total_expense_all > 0 else 0
+                if deficit_rate > 30:
+                    rating = "🔴 NGUY CẤP - Chi tiêu vượt quá nhiều"
+                elif deficit_rate > 15:
+                    rating = "⚠️ CẢNH BÁO - Đang chi vượt thu"
+                else:
+                    rating = "📉 THÂM HỤT NHẸ - Cần điều chỉnh"
+            
+            writer.writerow(['Đánh giá tổng quan:', rating])
+            writer.writerow([])
+            
+            # Khuyến nghị
+            writer.writerow(['KHUYẾN NGHỊ:'])
+            
+            # Danh mục chi nhiều nhất
+            if category_stats:
+                max_cat = max(category_stats.items(), key=lambda x: x[1]['total'])
+                writer.writerow([f'• Danh mục "{max_cat[1]["category"]}" chi nhiều nhất: {max_cat[1]["total"]:,.0f} {max_cat[1]["currency"]}'])
+            
+            # Danh mục vượt budget
+            over_budget = []
+            for key, data in category_stats.items():
+                if data['budget'] > 0 and data['total'] > data['budget']:
+                    over_budget.append(data)
+            
+            if over_budget:
+                writer.writerow([f'• Có {len(over_budget)} danh mục vượt budget:'])
+                for data in over_budget[:3]:  # Chỉ hiển thị 3 danh mục vượt nhiều nhất
+                    writer.writerow([f'  - {data["category"]}: vượt {data["total"] - data["budget"]:,.0f} {data["currency"]}'])
+            else:
+                writer.writerow(['• Tốt! Không có danh mục nào vượt budget'])
+            
+            # Tỷ lệ chi so với thu
+            if total_income_all > 0:
+                expense_ratio = (total_expense_all / total_income_all * 100)
+                if expense_ratio > 90:
+                    writer.writerow(['• Cảnh báo: Chi tiêu chiếm >90% thu nhập'])
+                elif expense_ratio > 70:
+                    writer.writerow(['• Chi tiêu chiếm ~70% thu nhập - Ổn định'])
+                else:
+                    writer.writerow([f'• Chi tiêu chỉ chiếm {expense_ratio:.1f}% thu nhập - Tốt'])
+            
+            # Gợi ý tiết kiệm
+            if total_balance > 0:
+                writer.writerow([f'• Bạn đang tiết kiệm được {total_balance:,.0f} VND - Có thể đầu tư thêm'])
+            else:
+                need_to_save = abs(total_balance)
+                writer.writerow([f'• Cần cắt giảm ~{need_to_save:,.0f} VND để cân bằng thu chi'])
+            
+            writer.writerow([])
+            writer.writerow(['='*80])
+            writer.writerow(['KẾT THÚC BÁO CÁO'])
+            writer.writerow(['='*80])
+            
+            return output.getvalue()
+            
+        except Exception as e:
+            logger.error(f"❌ Lỗi tạo detailed expense CSV: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def generate_expense_master_report(user_id, password=None):
+        """
+        Tạo báo cáo MASTER cho quản lý chi tiêu
+        Bao gồm TẤT CẢ thông tin và được mã hóa
+        """
+        try:
+            import csv
+            import io
+            from datetime import datetime
+            
+            # Tạo buffer cho CSV
+            csv_buffer = io.StringIO()
+            writer = csv.writer(csv_buffer)
+            
+            # =========================================
+            # 1. THÔNG TIN TỔNG QUAN
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['BÁO CÁO THU CHI MASTER'])
+            writer.writerow(['='*80])
+            writer.writerow(['Ngày xuất:', format_vn_time()])
+            writer.writerow(['User ID:', user_id])
+            writer.writerow(['Định dạng:', 'CSV MASTER - Bao gồm tất cả phân tích'])
+            writer.writerow(['Mã hóa:', 'AES-256' if password else 'Không mã hóa'])
+            writer.writerow([])
+            
+            # Lấy dữ liệu
+            incomes = get_recent_incomes(user_id, 5000)  # Lấy nhiều nhất
+            expenses = get_recent_expenses(user_id, 5000)
+            
+            if not incomes and not expenses:
+                writer.writerow(['KHÔNG CÓ DỮ LIỆU'])
+                csv_content = csv_buffer.getvalue()
+                
+                # Nếu có password, tạo ZIP
+                if password and HAS_PYZIPPER:
+                    return create_encrypted_zip(csv_content, f"expense_empty_{user_id}.csv", password)
+                return csv_content
+            
+            # =========================================
+            # 2. DANH SÁCH THU NHẬP
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['DANH SÁCH THU NHẬP'])
+            writer.writerow(['='*80])
+            
+            if incomes:
+                writer.writerow(['ID', 'Ngày', 'Nguồn', 'Số tiền', 'Loại tiền', 'Ghi chú'])
+                total_income = {}
+                income_by_month = {}
+                
+                for inc in incomes:
+                    inc_id, amount, source, note, date, currency = inc
+                    writer.writerow([inc_id, date, source, f"{amount:,.0f}", currency, note or ''])
+                    
+                    # Tổng theo loại tiền
+                    if currency not in total_income:
+                        total_income[currency] = 0
+                    total_income[currency] += amount
+                    
+                    # Tổng theo tháng
+                    month = date[:7]
+                    if month not in income_by_month:
+                        income_by_month[month] = {}
+                    if currency not in income_by_month[month]:
+                        income_by_month[month][currency] = 0
+                    income_by_month[month][currency] += amount
+                
+                writer.writerow([])
+                writer.writerow(['TỔNG THU THEO LOẠI TIỀN:'])
+                for currency, total in total_income.items():
+                    writer.writerow([currency, f"{total:,.0f}"])
+            else:
+                writer.writerow(['Không có dữ liệu thu nhập'])
+            
+            writer.writerow([])
+            
+            # =========================================
+            # 3. DANH SÁCH CHI TIÊU
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['DANH SÁCH CHI TIÊU'])
+            writer.writerow(['='*80])
+            
+            if expenses:
+                writer.writerow(['ID', 'Ngày', 'Danh mục', 'Số tiền', 'Loại tiền', 'Ghi chú'])
+                total_expense = {}
+                expense_by_month = {}
+                category_stats = {}
+                
+                for exp in expenses:
+                    exp_id, cat_name, amount, note, date, currency = exp
+                    writer.writerow([exp_id, date, cat_name, f"{amount:,.0f}", currency, note or ''])
+                    
+                    # Tổng theo loại tiền
+                    if currency not in total_expense:
+                        total_expense[currency] = 0
+                    total_expense[currency] += amount
+                    
+                    # Tổng theo tháng
+                    month = date[:7]
+                    if month not in expense_by_month:
+                        expense_by_month[month] = {}
+                    if currency not in expense_by_month[month]:
+                        expense_by_month[month][currency] = 0
+                    expense_by_month[month][currency] += amount
+                    
+                    # Thống kê theo danh mục
+                    key = f"{cat_name}_{currency}"
+                    if key not in category_stats:
+                        # Lấy budget từ database
+                        conn = sqlite3.connect(DB_PATH)
+                        c = conn.cursor()
+                        c.execute('''SELECT budget FROM expense_categories WHERE name = ? AND user_id = ?''', (cat_name, user_id))
+                        budget = c.fetchone()
+                        conn.close()
+                        
+                        category_stats[key] = {
+                            'category': cat_name,
+                            'currency': currency,
+                            'total': 0,
+                            'count': 0,
+                            'budget': budget[0] if budget else 0
+                        }
+                    category_stats[key]['total'] += amount
+                    category_stats[key]['count'] += 1
+                
+                writer.writerow([])
+                writer.writerow(['TỔNG CHI THEO LOẠI TIỀN:'])
+                for currency, total in total_expense.items():
+                    writer.writerow([currency, f"{total:,.0f}"])
+            else:
+                writer.writerow(['Không có dữ liệu chi tiêu'])
+            
+            writer.writerow([])
+            
+            # =========================================
+            # 4. PHÂN TÍCH THEO DANH MỤC
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['PHÂN TÍCH CHI TIÊU THEO DANH MỤC'])
+            writer.writerow(['='*80])
+            
+            if category_stats:
+                writer.writerow(['Danh mục', 'Loại tiền', 'Tổng chi', 'Số lần', 'Budget', '% Budget', 'Đánh giá'])
+                
+                for key, data in category_stats.items():
+                    percent = (data['total'] / data['budget'] * 100) if data['budget'] > 0 else 0
+                    
+                    if data['budget'] > 0:
+                        if percent > 100:
+                            status = "🔴 VƯỢT BUDGET"
+                        elif percent > 80:
+                            status = "⚠️ GẦN HẾT"
+                        else:
+                            status = "✅ TRONG BUDGET"
+                    else:
+                        status = "📊 KHÔNG BUDGET"
+                    
+                    writer.writerow([
+                        data['category'],
+                        data['currency'],
+                        f"{data['total']:,.0f}",
+                        data['count'],
+                        f"{data['budget']:,.0f}",
+                        f"{percent:.1f}%",
+                        status
+                    ])
+            else:
+                writer.writerow(['Không có dữ liệu chi tiêu'])
+            
+            writer.writerow([])
+            
+            # =========================================
+            # 5. CÂN ĐỐI THU CHI
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['CÂN ĐỐI THU CHI'])
+            writer.writerow(['='*80])
+            
+            all_currencies = set(list(total_income.keys()) + list(total_expense.keys()))
+            
+            writer.writerow(['Loại tiền', 'Tổng thu', 'Tổng chi', 'Cân đối', 'Đánh giá'])
+            for currency in sorted(all_currencies):
+                income = total_income.get(currency, 0)
+                expense = total_expense.get(currency, 0)
+                balance = income - expense
+                
+                if balance > 0:
+                    eval_ = "✅ TIẾT KIỆM"
+                elif balance < 0:
+                    eval_ = "❌ THÂM HỤT"
+                else:
+                    eval_ = "➖ CÂN BẰNG"
+                
+                writer.writerow([
+                    currency,
+                    f"{income:,.0f}",
+                    f"{expense:,.0f}",
+                    f"{balance:,.0f}",
+                    eval_
+                ])
+            
+            writer.writerow([])
+            
+            # =========================================
+            # 6. PHÂN TÍCH THEO THÁNG
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['PHÂN TÍCH THEO THÁNG'])
+            writer.writerow(['='*80])
+            
+            all_months = sorted(set(list(income_by_month.keys()) + list(expense_by_month.keys())))
+            
+            writer.writerow(['Tháng', 'Thu (VND)', 'Chi (VND)', 'Cân đối', 'Thu (USD)', 'Chi (USD)', 'Cân đối'])
+            
+            for month in all_months:
+                # VND
+                income_vnd = income_by_month.get(month, {}).get('VND', 0)
+                expense_vnd = expense_by_month.get(month, {}).get('VND', 0)
+                balance_vnd = income_vnd - expense_vnd
+                
+                # USD
+                income_usd = income_by_month.get(month, {}).get('USD', 0)
+                expense_usd = expense_by_month.get(month, {}).get('USD', 0)
+                balance_usd = income_usd - expense_usd
+                
+                writer.writerow([
+                    month,
+                    f"{income_vnd:,.0f}",
+                    f"{expense_vnd:,.0f}",
+                    f"{balance_vnd:,.0f}",
+                    f"{income_usd:,.2f}",
+                    f"{expense_usd:,.2f}",
+                    f"{balance_usd:,.2f}"
+                ])
+            
+            writer.writerow([])
+            
+            # =========================================
+            # 7. THỐNG KÊ TỔNG HỢP
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['THỐNG KÊ TỔNG HỢP'])
+            writer.writerow(['='*80])
+            
+            total_income_all = sum(total_income.values())
+            total_expense_all = sum(total_expense.values())
+            
+            writer.writerow(['Tổng số khoản thu:', len(incomes)])
+            writer.writerow(['Tổng số khoản chi:', len(expenses)])
+            writer.writerow(['Tổng thu (quy đổi VND):', f"{total_income_all:,.0f} VND"])
+            writer.writerow(['Tổng chi (quy đổi VND):', f"{total_expense_all:,.0f} VND"])
+            writer.writerow(['Tổng cân đối:', f"{total_income_all - total_expense_all:,.0f} VND"])
+            
+            # Tỷ lệ chi theo danh mục
+            if total_expense_all > 0 and category_stats:
+                writer.writerow([])
+                writer.writerow(['TỶ LỆ CHI THEO DANH MỤC:'])
+                
+                # Sắp xếp theo tổng chi giảm dần
+                sorted_cats = sorted(category_stats.items(), key=lambda x: x[1]['total'], reverse=True)
+                for key, data in sorted_cats[:5]:  # Top 5
+                    percent = (data['total'] / total_expense_all * 100)
+                    writer.writerow([f"• {data['category']}: {percent:.1f}% ({data['total']:,.0f} {data['currency']})"])
+            
+            writer.writerow([])
+            
+            # =========================================
+            # 8. ĐÁNH GIÁ & KHUYẾN NGHỊ
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['ĐÁNH GIÁ & KHUYẾN NGHỊ'])
+            writer.writerow(['='*80])
+            
+            total_balance = total_income_all - total_expense_all
+            
+            # Đánh giá tổng quan
+            if total_balance > 0:
+                savings_rate = (total_balance / total_income_all * 100) if total_income_all > 0 else 0
+                if savings_rate > 30:
+                    rating = "🚀 XUẤT SẮC - Tiết kiệm rất tốt"
+                elif savings_rate > 15:
+                    rating = "✅ TỐT - Có quỹ tiết kiệm"
+                else:
+                    rating = "📊 ỔN ĐỊNH - Cân đối tốt"
+            else:
+                deficit_rate = (abs(total_balance) / total_expense_all * 100) if total_expense_all > 0 else 0
+                if deficit_rate > 30:
+                    rating = "🔴 NGUY CẤP - Chi tiêu vượt quá nhiều"
+                elif deficit_rate > 15:
+                    rating = "⚠️ CẢNH BÁO - Đang chi vượt thu"
+                else:
+                    rating = "📉 THÂM HỤT NHẸ - Cần điều chỉnh"
+            
+            writer.writerow(['Đánh giá tổng quan:', rating])
+            writer.writerow([])
+            
+            # Khuyến nghị
+            writer.writerow(['KHUYẾN NGHỊ:'])
+            
+            # Danh mục chi nhiều nhất
+            if category_stats:
+                # Tìm danh mục chi nhiều nhất
+                max_cat = max(category_stats.items(), key=lambda x: x[1]['total'])
+                writer.writerow([f'• Danh mục "{max_cat[1]["category"]}" chi nhiều nhất: {max_cat[1]["total"]:,.0f} {max_cat[1]["currency"]}'])
+            
+            # Danh mục vượt budget
+            over_budget = []
+            for key, data in category_stats.items():
+                if data['budget'] > 0 and data['total'] > data['budget']:
+                    over_budget.append(data)
+            
+            if over_budget:
+                writer.writerow([f'• Có {len(over_budget)} danh mục vượt budget:'])
+                for data in over_budget[:3]:
+                    writer.writerow([f'  - {data["category"]}: vượt {data["total"] - data["budget"]:,.0f} {data["currency"]}'])
+            else:
+                writer.writerow(['• Tốt! Không có danh mục nào vượt budget'])
+            
+            # Tỷ lệ chi
+            if total_income_all > 0:
+                expense_ratio = (total_expense_all / total_income_all * 100)
+                if expense_ratio > 90:
+                    writer.writerow(['• Cảnh báo: Chi tiêu chiếm >90% thu nhập'])
+                elif expense_ratio > 70:
+                    writer.writerow(['• Chi tiêu chiếm ~70% thu nhập - Ổn định'])
+                else:
+                    writer.writerow([f'• Chi tiêu chỉ chiếm {expense_ratio:.1f}% thu nhập - Tốt'])
+            
+            writer.writerow([])
+            writer.writerow(['='*80])
+            writer.writerow(['KẾT THÚC BÁO CÁO'])
+            writer.writerow(['='*80])
+            
+            # Lấy nội dung CSV
+            csv_content = csv_buffer.getvalue()
+            
+            # Nếu có password, tạo ZIP mã hóa
+            if password and HAS_PYZIPPER:
+                return create_encrypted_zip(csv_content, f"expense_master_{user_id}.csv", password)
+            
+            return csv_content
+            
+        except Exception as e:
+            logger.error(f"❌ Lỗi tạo expense master report: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -5904,6 +6639,110 @@ try:
                 parse_mode=ParseMode.MARKDOWN
             )
 
+    @auto_update_user
+    @require_permission('view')
+    async def export_expense_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Xuất báo cáo chi tiêu MASTER: /export_expense [password]"""
+        user_id = ctx.bot_data.get('effective_user_id', update.effective_user.id)
+        
+        # Kiểm tra nếu không có password
+        if not ctx.args:
+            await update.message.reply_text(
+                "🔐 *XUẤT BÁO CÁO CHI TIÊU MASTER*\n\n"
+                "Dùng lệnh: `/export_expense [mật khẩu]`\n\n"
+                "*Ví dụ:*\n"
+                "• `/export_expense 123456` - File ZIP có mật khẩu (tự xóa sau 30s)\n"
+                "• `/export_expense 0` - File CSV không mã hóa\n\n"
+                "*File báo cáo bao gồm:*\n"
+                "✅ Danh sách thu nhập chi tiết\n"
+                "✅ Danh sách chi tiêu chi tiết\n"
+                "✅ Phân tích theo danh mục\n"
+                "✅ Cân đối theo loại tiền\n"
+                "✅ Phân tích theo tháng\n"
+                "✅ Đánh giá budget & khuyến nghị\n\n"
+                f"🕐 {format_vn_time_short()}",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+        
+        password = ctx.args[0]
+        msg = await update.message.reply_text("🔄 Đang tạo báo cáo chi tiêu MASTER...")
+        
+        try:
+            # Tạo báo cáo master
+            result = generate_expense_master_report(user_id, password if password != '0' else None)
+            
+            if not result:
+                await msg.edit_text("❌ Không thể tạo báo cáo!")
+                return
+            
+            timestamp = get_vn_time().strftime('%Y%m%d_%H%M%S')
+            
+            # Nếu có password và password != '0' -> gửi ZIP
+            if password != '0' and HAS_PYZIPPER and isinstance(result, dict):
+                # Gửi file ZIP
+                sent_message = await update.message.reply_document(
+                    document=result['content'],
+                    filename=result['filename'],
+                    caption=f"🔐 *BÁO CÁO CHI TIÊU MASTER ĐÃ MÃ HÓA*\n"
+                            f"━━━━━━━━━━━━━━━━\n\n"
+                            f"✅ *Số khoản thu:* {len(get_recent_incomes(user_id, 5000))}\n"
+                            f"✅ *Số khoản chi:* {len(get_recent_expenses(user_id, 5000))}\n"
+                            f"🔑 *Mật khẩu:* `{password}`\n"
+                            f"📁 *File:* `{result['filename']}`\n\n"
+                            f"📊 *Nội dung:*\n"
+                            f"• Phân tích thu chi chi tiết\n"
+                            f"• Thống kê theo danh mục\n"
+                            f"• Đánh giá budget\n"
+                            f"• Khuyến nghị tài chính\n\n"
+                            f"⚠️ *TỰ ĐỘNG XÓA sau 30 giây*\n"
+                            f"• Hãy tải file ngay!\n\n"
+                            f"🕐 {format_vn_time()}",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                
+                # Xóa tin nhắn lệnh gốc (chứa mật khẩu)
+                try:
+                    await update.message.delete()
+                    logger.info(f"✅ Đã xóa tin nhắn lệnh gốc của user {user_id}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Không thể xóa tin nhắn lệnh gốc: {e}")
+                    
+                # Tự động xóa tin nhắn chứa file sau 30s
+                asyncio.create_task(auto_delete_message(ctx, update.effective_chat.id, sent_message.message_id, 30))
+            
+            else:
+                # Gửi CSV thường
+                filename = f"expense_master_{user_id}_{timestamp}.csv"
+                await update.message.reply_document(
+                    document=io.BytesIO(result.encode('utf-8-sig')),
+                    filename=filename,
+                    caption=f"📊 *BÁO CÁO CHI TIÊU MASTER*\n"
+                            f"━━━━━━━━━━━━━━━━\n\n"
+                            f"✅ *Số khoản thu:* {len(get_recent_incomes(user_id, 5000))}\n"
+                            f"✅ *Số khoản chi:* {len(get_recent_expenses(user_id, 5000))}\n"
+                            f"📁 *File:* `{filename}`\n\n"
+                            f"📊 *Nội dung:*\n"
+                            f"• Phân tích thu chi chi tiết\n"
+                            f"• Thống kê theo danh mục\n"
+                            f"• Đánh giá budget\n"
+                            f"• Khuyến nghị tài chính\n\n"
+                            f"🕐 {format_vn_time()}",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            
+            await msg.delete()
+            logger.info(f"✅ User {user_id} đã xuất báo cáo chi tiêu master thành công")
+            
+        except Exception as e:
+            logger.error(f"❌ Lỗi export expense master: {e}", exc_info=True)
+            await msg.edit_text(
+                f"❌ *LỖI KHI XUẤT BÁO CÁO*\n\n"
+                f"Lỗi: `{str(e)[:200]}`\n\n"
+                f"Vui lòng thử lại sau.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+
     async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
@@ -7006,7 +7845,31 @@ try:
                     ]])
                 )
                 return
-            
+            # ===========================================
+            # XỬ LÝ XUẤT BÁO CÁO CHI TIÊU
+            # ===========================================
+            if data == "export_expense_menu":
+                await safe_edit_message(
+                    query,
+                    "🔐 *XUẤT BÁO CÁO CHI TIÊU MASTER*\n\n"
+                    "Dùng lệnh: `/export_expense [mật khẩu]`\n\n"
+                    "*Ví dụ:*\n"
+                    "• `/export_expense 123456` - File ZIP có mật khẩu (tự xóa sau 30s)\n"
+                    "• `/export_expense 0` - File CSV không mã hóa\n\n"
+                    "*Báo cáo bao gồm TẤT CẢ:*\n"
+                    "📊 Danh sách thu nhập chi tiết\n"
+                    "📊 Danh sách chi tiêu chi tiết\n"
+                    "📋 Phân tích theo danh mục\n"
+                    "⚖️ Cân đối theo loại tiền\n"
+                    "📅 Phân tích theo tháng\n"
+                    "💡 Đánh giá budget & khuyến nghị\n\n"
+                    f"🕐 {format_vn_time_short()}",
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("🔙 Về menu chi tiêu", callback_data="back_to_expense")
+                    ]])
+                )
+                return
             # ===========================================
             # XỬ LÝ CALLBACK KHÔNG XÁC ĐỊNH
             # ===========================================
@@ -7508,6 +8371,7 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
             app.add_handler(CommandHandler("myperm", myperm_command))
             app.add_handler(CommandHandler("export", export_master_command))
             app.add_handler(CommandHandler("export_secure", export_secure_command))
+            app.add_handler(CommandHandler("export_expense", export_expense_command))
             app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_chat_members))
             app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
             app.add_handler(CallbackQueryHandler(handle_callback))
