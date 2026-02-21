@@ -1850,7 +1850,7 @@ try:
         ]
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-    def get_invest_menu_keyboard(user_id=None, group_id=None):
+    def get_invest_menu_keyboard(user_id=None, group_id=None, chat_type=None):
         keyboard = [
             [InlineKeyboardButton("₿ BTC", callback_data="price_BTC"),
              InlineKeyboardButton("Ξ ETH", callback_data="price_ETH"),
@@ -1869,8 +1869,6 @@ try:
         # Chỉ hiển thị nút ADMIN nếu đang ở trong group và có quyền
         if group_id and user_id:
             try:
-                # Kiểm tra nếu đang ở trong group
-                chat_type = ctx.bot_data.get('chat_type') if hasattr(ctx, 'bot_data') else None
                 if chat_type in ['group', 'supergroup'] and check_permission(group_id, user_id, 'view'):
                     keyboard.append([InlineKeyboardButton("👑 ADMIN", callback_data="admin_panel")])
             except:
@@ -4693,7 +4691,7 @@ try:
             await update.message.reply_text(
                 f"💰 *MENU ĐẦU TƯ COIN*\n━━━━━━━━━━━━━━━━\n\n🕐 {format_vn_time()}", 
                 parse_mode=ParseMode.MARKDOWN, 
-                reply_markup=get_invest_menu_keyboard(user_id, chat_id)
+                reply_markup=get_invest_menu_keyboard(user_id, chat_id, chat_type)
             )
             return
             
@@ -5055,7 +5053,7 @@ try:
                 uid = query.from_user.id
                 gid = query.message.chat.id
                 msg = f"💰 *MENU ĐẦU TƯ COIN*\n━━━━━━━━━━━━━━━━\n\n🕐 {format_vn_time()}"
-                await safe_edit_message(query, msg, reply_markup=get_invest_menu_keyboard(uid, gid))
+                await safe_edit_message(query, msg, reply_markup=get_invest_menu_keyboard(uid, gid, chat_type))
                 return
             
             if data == "back_to_expense":
@@ -6240,8 +6238,6 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
             app.add_handler(CommandHandler("editchi", edit_expense_command))
             app.add_handler(CommandHandler("suathu", edit_income_command))
             app.add_handler(CommandHandler("suachi", edit_expense_command))
-            app.add_handler(CommandHandler("grant", grant_command))
-            app.add_handler(CommandHandler("myperm", myperm_command))
             app.add_handler(CommandHandler("grant", grant_command))
             app.add_handler(CommandHandler("myperm", myperm_command))
             app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_chat_members))
