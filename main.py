@@ -6201,7 +6201,7 @@ try:
         user_id = update.effective_user.id
         chat_id = update.effective_chat.id
         
-        logger.info(f"📨 Tin nhắn từ user {user_id} trong {chat_type}: '{text}'")
+        logger.info(f"📨 Tin nhắn từ user {user_id} Group ID: {chat_id} trong {chat_type}: '{text}'")
         
         # TRONG GROUP: Kiểm tra quyền trước khi xử lý
         if chat_type in ['group', 'supergroup']:
