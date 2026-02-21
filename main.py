@@ -1922,10 +1922,9 @@ try:
             [InlineKeyboardButton("✏️ Sửa/Xóa", callback_data="edit_transactions"),
              InlineKeyboardButton("📊 Thống kê", callback_data="show_stats")],
             [InlineKeyboardButton("🔔 Cảnh báo giá", callback_data="show_alerts"),
-             InlineKeyboardButton("📥 Xuất CSV", callback_data="export_csv")],
-            [InlineKeyboardButton("🔐 Xuất mã hóa", callback_data="export_secure"),  # <-- NÚT MỚI
-             InlineKeyboardButton("➕ Mua coin", callback_data="show_buy")],
-            [InlineKeyboardButton("➖ Bán coin", callback_data="show_sell")]
+             InlineKeyboardButton("🔐 Xuất dữ liệu", callback_data="export_master")],  # <-- NÚT DUY NHẤT
+            [InlineKeyboardButton("➕ Mua coin", callback_data="show_buy"),
+             InlineKeyboardButton("➖ Bán coin", callback_data="show_sell")]
         ]
         
         # Thêm nút ADMIN nếu cần
@@ -3399,6 +3398,621 @@ try:
             }
         except Exception as e:
             logger.error(f"❌ Lỗi get_portfolio_stats: {e}")
+            return None
+
+    def generate_detailed_portfolio_csv(user_id):
+        """
+        Tạo file CSV chi tiết cho portfolio đầu tư
+        """
+        try:
+            import csv
+            import io
+            from datetime import datetime
+            
+            # Tạo buffer để chứa CSV
+            output = io.StringIO()
+            writer = csv.writer(output)
+            
+            # =========================================
+            # 1. THÔNG TIN TỔNG QUAN
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['BÁO CÁO ĐẦU TƯ CHI TIẾT'])
+            writer.writerow(['='*80])
+            writer.writerow(['Ngày xuất:', format_vn_time()])
+            writer.writerow(['User ID:', user_id])
+            writer.writerow([])
+            
+            # Lấy dữ liệu
+            transactions = get_transaction_detail(user_id)
+            if not transactions:
+                writer.writerow(['KHÔNG CÓ DỮ LIỆU'])
+                return output.getvalue()
+            
+            # =========================================
+            # 2. DANH SÁCH GIAO DỊCH CHI TIẾT
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['DANH SÁCH GIAO DỊCH'])
+            writer.writerow(['='*80])
+            writer.writerow([
+                'ID', 'Mã coin', 'Số lượng', 'Giá mua (USD)', 
+                'Ngày mua', 'Tổng vốn (USD)', 'Giá hiện tại (USD)',
+                'Giá trị hiện tại (USD)', 'Lợi nhuận (USD)', 'Lợi nhuận (%)', 'Thời gian nắm giữ (ngày)'
+            ])
+            
+            total_invest = 0
+            total_current = 0
+            all_coins = {}
+            
+            for tx in transactions:
+                tx_id, symbol, amount, buy_price, buy_date, total_cost = tx
+                
+                # Lấy giá hiện tại
+                price_data = get_price(symbol)
+                current_price = price_data['p'] if price_data else buy_price
+                current_value = amount * current_price
+                profit = current_value - total_cost
+                profit_pct = (profit / total_cost * 100) if total_cost > 0 else 0
+                
+                # Tính thời gian nắm giữ
+                try:
+                    buy_datetime = datetime.strptime(buy_date, "%Y-%m-%d %H:%M:%S")
+                    hold_days = (get_vn_time() - buy_datetime).days
+                except:
+                    hold_days = 0
+                
+                # Ghi dòng giao dịch
+                writer.writerow([
+                    tx_id, symbol, f"{amount:.8f}", f"${buy_price:,.2f}",
+                    buy_date[:10], f"${total_cost:,.2f}", f"${current_price:,.2f}",
+                    f"${current_value:,.2f}", f"${profit:,.2f}", f"{profit_pct:+.2f}%",
+                    hold_days
+                ])
+                
+                # Cộng dồn cho tổng hợp
+                total_invest += total_cost
+                total_current += current_value
+                
+                # Tổng hợp theo coin
+                if symbol not in all_coins:
+                    all_coins[symbol] = {
+                        'amount': 0,
+                        'invest': 0,
+                        'current': 0,
+                        'profit': 0,
+                        'transactions': 0
+                    }
+                all_coins[symbol]['amount'] += amount
+                all_coins[symbol]['invest'] += total_cost
+                all_coins[symbol]['current'] += current_value
+                all_coins[symbol]['profit'] += profit
+                all_coins[symbol]['transactions'] += 1
+            
+            writer.writerow([])
+            
+            # =========================================
+            # 3. TỔNG KẾT DANH MỤC
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['TỔNG KẾT DANH MỤC'])
+            writer.writerow(['='*80])
+            total_profit = total_current - total_invest
+            total_profit_pct = (total_profit / total_invest * 100) if total_invest > 0 else 0
+            
+            writer.writerow(['Tổng vốn đầu tư:', f"${total_invest:,.2f}"])
+            writer.writerow(['Tổng giá trị hiện tại:', f"${total_current:,.2f}"])
+            writer.writerow(['Tổng lợi nhuận:', f"${total_profit:,.2f}"])
+            writer.writerow(['Tỷ suất lợi nhuận:', f"{total_profit_pct:+.2f}%"])
+            writer.writerow(['Số loại coin:', len(all_coins)])
+            writer.writerow(['Tổng số giao dịch:', len(transactions)])
+            writer.writerow([])
+            
+            # =========================================
+            # 4. PHÂN TÍCH THEO TỪNG COIN
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['PHÂN TÍCH THEO TỪNG COIN'])
+            writer.writerow(['='*80])
+            writer.writerow([
+                'Mã coin', 'Số lượng', 'Tổng vốn', 'Giá trị hiện tại',
+                'Lợi nhuận', 'Tỷ suất', 'Số giao dịch', 'Tỷ trọng'
+            ])
+            
+            for symbol, data in all_coins.items():
+                weight = (data['current'] / total_current * 100) if total_current > 0 else 0
+                profit_pct = (data['profit'] / data['invest'] * 100) if data['invest'] > 0 else 0
+                
+                writer.writerow([
+                    symbol,
+                    f"{data['amount']:.8f}",
+                    f"${data['invest']:,.2f}",
+                    f"${data['current']:,.2f}",
+                    f"${data['profit']:,.2f}",
+                    f"{profit_pct:+.2f}%",
+                    data['transactions'],
+                    f"{weight:.1f}%"
+                ])
+            
+            writer.writerow([])
+            
+            # =========================================
+            # 5. TOP COIN LỜI NHẤT
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['TOP 5 COIN LỜI NHẤT'])
+            writer.writerow(['='*80])
+            
+            sorted_coins = sorted(all_coins.items(), key=lambda x: x[1]['profit'], reverse=True)
+            writer.writerow(['Mã coin', 'Lợi nhuận', 'Tỷ suất', 'Giá trị'])
+            
+            count = 0
+            for symbol, data in sorted_coins:
+                if data['profit'] > 0:
+                    count += 1
+                    profit_pct = (data['profit'] / data['invest'] * 100) if data['invest'] > 0 else 0
+                    writer.writerow([
+                        symbol,
+                        f"${data['profit']:,.2f}",
+                        f"{profit_pct:+.2f}%",
+                        f"${data['current']:,.2f}"
+                    ])
+                    if count >= 5:
+                        break
+            
+            if count == 0:
+                writer.writerow(['Không có coin lời'])
+            
+            writer.writerow([])
+            
+            # =========================================
+            # 6. TOP COIN LỖ NHẤT
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['TOP 5 COIN LỖ NHẤT'])
+            writer.writerow(['='*80])
+            
+            writer.writerow(['Mã coin', 'Lỗ', 'Tỷ suất', 'Giá trị'])
+            count = 0
+            for symbol, data in reversed(sorted_coins):
+                if data['profit'] < 0:
+                    count += 1
+                    profit_pct = (data['profit'] / data['invest'] * 100) if data['invest'] > 0 else 0
+                    writer.writerow([
+                        symbol,
+                        f"${data['profit']:,.2f}",
+                        f"{profit_pct:+.2f}%",
+                        f"${data['current']:,.2f}"
+                    ])
+                    if count >= 5:
+                        break
+            
+            if count == 0:
+                writer.writerow(['Không có coin lỗ'])
+            
+            writer.writerow([])
+            
+            # =========================================
+            # 7. PHÂN TÍCH THEO THỜI GIAN
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['PHÂN TÍCH THEO THỜI GIAN'])
+            writer.writerow(['='*80])
+            
+            # Phân tích theo tháng
+            monthly_data = {}
+            for tx in transactions:
+                tx_id, symbol, amount, buy_price, buy_date, total_cost = tx
+                month = buy_date[:7]  # YYYY-MM
+                
+                if month not in monthly_data:
+                    monthly_data[month] = {'invest': 0, 'transactions': 0}
+                monthly_data[month]['invest'] += total_cost
+                monthly_data[month]['transactions'] += 1
+            
+            writer.writerow(['Vốn đầu tư theo tháng:'])
+            writer.writerow(['Tháng', 'Số tiền đầu tư', 'Số giao dịch'])
+            for month in sorted(monthly_data.keys()):
+                writer.writerow([
+                    month,
+                    f"${monthly_data[month]['invest']:,.2f}",
+                    monthly_data[month]['transactions']
+                ])
+            
+            writer.writerow([])
+            
+            # =========================================
+            # 8. DỰ BÁO LỢI NHUẬN
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['DỰ BÁO LỢI NHUẬN (KỊCH BẢN)'])
+            writer.writerow(['='*80])
+            writer.writerow(['*Dự báo dựa trên giả định thị trường tăng/giảm*'])
+            writer.writerow([])
+            
+            scenarios = [-30, -20, -10, 10, 20, 30]
+            writer.writerow(['Kịch bản', 'Giá trị danh mục', 'Lợi nhuận', 'Tỷ suất'])
+            
+            for scenario in scenarios:
+                multiplier = 1 + (scenario / 100)
+                projected_value = total_current * multiplier
+                projected_profit = projected_value - total_invest
+                projected_pct = (projected_profit / total_invest * 100) if total_invest > 0 else 0
+                
+                emoji = "📈" if scenario > 0 else "📉" if scenario < 0 else "➡️"
+                writer.writerow([
+                    f"{emoji} {scenario:+.0f}%",
+                    f"${projected_value:,.2f}",
+                    f"${projected_profit:,.2f}",
+                    f"{projected_pct:+.2f}%"
+                ])
+            
+            writer.writerow([])
+            
+            # =========================================
+            # 9. ĐÁNH GIÁ & KHUYẾN NGHỊ
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['ĐÁNH GIÁ & KHUYẾN NGHỊ'])
+            writer.writerow(['='*80])
+            
+            # Đánh giá dựa trên lợi nhuận
+            if total_profit > 0:
+                if total_profit_pct > 50:
+                    rating = "🚀 XUẤT SẮC - Lợi nhuận rất cao"
+                elif total_profit_pct > 20:
+                    rating = "✅ TỐT - Lợi nhuận khả quan"
+                elif total_profit_pct > 0:
+                    rating = "📊 TẠM ỔN - Có lợi nhuận nhẹ"
+            else:
+                if total_profit_pct < -50:
+                    rating = "🔴 RỦI RO CAO - Lỗ nặng"
+                elif total_profit_pct < -20:
+                    rating = "⚠️ CẦN XEM XÉT - Lỗ đáng kể"
+                else:
+                    rating = "📉 ĐANG LỖ NHẸ"
+            
+            writer.writerow(['Đánh giá tổng quan:', rating])
+            writer.writerow([])
+            
+            # Khuyến nghị
+            writer.writerow(['KHUYẾN NGHỊ:'])
+            
+            # Coin lời nhiều nhất
+            if sorted_coins and sorted_coins[0][1]['profit'] > 0:
+                best_coin = sorted_coins[0]
+                writer.writerow([f'• {best_coin[0]} đang lời nhất (${best_coin[1]["profit"]:,.2f}) - Có thể cân nhắc chốt lời một phần'])
+            
+            # Coin lỗ nhiều nhất
+            if sorted_coins and sorted_coins[-1][1]['profit'] < 0:
+                worst_coin = sorted_coins[-1]
+                writer.writerow([f'• {worst_coin[0]} đang lỗ nhất (${abs(worst_coin[1]["profit"]):,.2f}) - Cân nhắc cắt lỗ hoặc đợi hồi'])
+            
+            # Đa dạng hóa
+            if len(all_coins) < 3:
+                writer.writerow(['• Danh mục chưa đa dạng, nên đầu tư thêm các coin khác để phân tán rủi ro'])
+            elif len(all_coins) > 10:
+                writer.writerow(['• Danh mục khá đa dạng, theo dõi sát các coin nhỏ'])
+            
+            # Tỷ trọng
+            for symbol, data in all_coins.items():
+                weight = (data['current'] / total_current * 100) if total_current > 0 else 0
+                if weight > 50:
+                    writer.writerow([f'• {symbol} chiếm {weight:.1f}% danh mục - Rủi ro tập trung cao'])
+                elif weight > 30:
+                    writer.writerow([f'• {symbol} chiếm {weight:.1f}% danh mục - Tỷ trọng khá lớn'])
+            
+            writer.writerow([])
+            writer.writerow(['='*80])
+            writer.writerow(['KẾT THÚC BÁO CÁO'])
+            writer.writerow(['='*80])
+            
+            return output.getvalue()
+            
+        except Exception as e:
+            logger.error(f"❌ Lỗi tạo CSV chi tiết: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def generate_master_report(user_id, password=None):
+        """
+        Tạo file báo cáo MASTER bao gồm TẤT CẢ thông tin:
+        - Dữ liệu giao dịch
+        - Phân tích lợi nhuận
+        - Thống kê chi tiết
+        - Dự báo
+        - Khuyến nghị
+        - Và được mã hóa bằng mật khẩu (nếu có)
+        """
+        try:
+            import csv
+            import io
+            import pyzipper
+            from datetime import datetime
+            
+            # Tạo buffer cho CSV
+            csv_buffer = io.StringIO()
+            writer = csv.writer(csv_buffer)
+            
+            # =========================================
+            # 1. THÔNG TIN TỔNG QUAN
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['BÁO CÁO ĐẦU TƯ MASTER'])
+            writer.writerow(['='*80])
+            writer.writerow(['Ngày xuất:', format_vn_time()])
+            writer.writerow(['User ID:', user_id])
+            writer.writerow(['Định dạng:', 'CSV MASTER - Bao gồm tất cả phân tích'])
+            writer.writerow(['Mã hóa:', 'AES-256' if password else 'Không mã hóa'])
+            writer.writerow([])
+            
+            # Lấy dữ liệu
+            transactions = get_transaction_detail(user_id)
+            
+            if not transactions:
+                writer.writerow(['KHÔNG CÓ DỮ LIỆU'])
+                csv_content = csv_buffer.getvalue()
+                
+                # Nếu có password, tạo ZIP
+                if password and HAS_PYZIPPER:
+                    return create_encrypted_zip(csv_content, f"report_empty_{user_id}.csv", password)
+                return csv_content
+            
+            # =========================================
+            # 2. DANH SÁCH GIAO DỊCH CHI TIẾT
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['DANH SÁCH GIAO DỊCH'])
+            writer.writerow(['='*80])
+            writer.writerow([
+                'ID', 'Mã coin', 'Số lượng', 'Giá mua (USD)', 
+                'Ngày mua', 'Tổng vốn (USD)', 'Giá hiện tại (USD)',
+                'Giá trị hiện tại (USD)', 'Lợi nhuận (USD)', 'Lợi nhuận (%)', 'Thời gian nắm giữ (ngày)'
+            ])
+            
+            total_invest = 0
+            total_current = 0
+            all_coins = {}
+            
+            for tx in transactions:
+                tx_id, symbol, amount, buy_price, buy_date, total_cost = tx
+                
+                # Lấy giá hiện tại
+                price_data = get_price(symbol)
+                current_price = price_data['p'] if price_data else buy_price
+                current_value = amount * current_price
+                profit = current_value - total_cost
+                profit_pct = (profit / total_cost * 100) if total_cost > 0 else 0
+                
+                # Tính thời gian nắm giữ
+                buy_datetime = datetime.strptime(buy_date, "%Y-%m-%d %H:%M:%S")
+                hold_days = (get_vn_time() - buy_datetime).days
+                
+                # Ghi dòng giao dịch
+                writer.writerow([
+                    tx_id, symbol, f"{amount:.8f}", f"${buy_price:,.2f}",
+                    buy_date[:10], f"${total_cost:,.2f}", f"${current_price:,.2f}",
+                    f"${current_value:,.2f}", f"${profit:,.2f}", f"{profit_pct:+.2f}%",
+                    hold_days
+                ])
+                
+                # Cộng dồn cho tổng hợp
+                total_invest += total_cost
+                total_current += current_value
+                
+                # Tổng hợp theo coin
+                if symbol not in all_coins:
+                    all_coins[symbol] = {
+                        'amount': 0,
+                        'invest': 0,
+                        'current': 0,
+                        'profit': 0,
+                        'transactions': 0
+                    }
+                all_coins[symbol]['amount'] += amount
+                all_coins[symbol]['invest'] += total_cost
+                all_coins[symbol]['current'] += current_value
+                all_coins[symbol]['profit'] += profit
+                all_coins[symbol]['transactions'] += 1
+            
+            writer.writerow([])
+            
+            # =========================================
+            # 3. TỔNG KẾT DANH MỤC
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['TỔNG KẾT DANH MỤC'])
+            writer.writerow(['='*80])
+            total_profit = total_current - total_invest
+            total_profit_pct = (total_profit / total_invest * 100) if total_invest > 0 else 0
+            
+            writer.writerow(['Tổng vốn đầu tư:', f"${total_invest:,.2f}"])
+            writer.writerow(['Tổng giá trị hiện tại:', f"${total_current:,.2f}"])
+            writer.writerow(['Tổng lợi nhuận:', f"${total_profit:,.2f}"])
+            writer.writerow(['Tỷ suất lợi nhuận:', f"{total_profit_pct:+.2f}%"])
+            writer.writerow(['Số loại coin:', len(all_coins)])
+            writer.writerow(['Tổng số giao dịch:', len(transactions)])
+            writer.writerow([])
+            
+            # =========================================
+            # 4. PHÂN TÍCH THEO TỪNG COIN
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['PHÂN TÍCH THEO TỪNG COIN'])
+            writer.writerow(['='*80])
+            writer.writerow([
+                'Mã coin', 'Số lượng', 'Tổng vốn', 'Giá trị hiện tại',
+                'Lợi nhuận', 'Tỷ suất', 'Số giao dịch', 'Tỷ trọng'
+            ])
+            
+            for symbol, data in all_coins.items():
+                weight = (data['current'] / total_current * 100) if total_current > 0 else 0
+                profit_pct = (data['profit'] / data['invest'] * 100) if data['invest'] > 0 else 0
+                
+                writer.writerow([
+                    symbol,
+                    f"{data['amount']:.8f}",
+                    f"${data['invest']:,.2f}",
+                    f"${data['current']:,.2f}",
+                    f"${data['profit']:,.2f}",
+                    f"{profit_pct:+.2f}%",
+                    data['transactions'],
+                    f"{weight:.1f}%"
+                ])
+            
+            writer.writerow([])
+            
+            # =========================================
+            # 5. TOP COIN LỜI/LỖ
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['TOP COIN LỜI NHẤT'])
+            writer.writerow(['='*80])
+            
+            sorted_coins = sorted(all_coins.items(), key=lambda x: x[1]['profit'], reverse=True)
+            writer.writerow(['Mã coin', 'Lợi nhuận', 'Tỷ suất', 'Giá trị'])
+            
+            for symbol, data in sorted_coins[:5]:
+                if data['profit'] > 0:
+                    profit_pct = (data['profit'] / data['invest'] * 100) if data['invest'] > 0 else 0
+                    writer.writerow([
+                        symbol,
+                        f"${data['profit']:,.2f}",
+                        f"{profit_pct:+.2f}%",
+                        f"${data['current']:,.2f}"
+                    ])
+            
+            writer.writerow([])
+            writer.writerow(['TOP COIN LỖ NHẤT'])
+            writer.writerow(['='*80])
+            
+            writer.writerow(['Mã coin', 'Lỗ', 'Tỷ suất', 'Giá trị'])
+            for symbol, data in reversed(sorted_coins[-5:]):
+                if data['profit'] < 0:
+                    profit_pct = (data['profit'] / data['invest'] * 100) if data['invest'] > 0 else 0
+                    writer.writerow([
+                        symbol,
+                        f"${data['profit']:,.2f}",
+                        f"{profit_pct:+.2f}%",
+                        f"${data['current']:,.2f}"
+                    ])
+            
+            writer.writerow([])
+            
+            # =========================================
+            # 6. DỰ BÁO LỢI NHUẬN
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['DỰ BÁO LỢI NHUẬN (KỊCH BẢN)'])
+            writer.writerow(['='*80])
+            writer.writerow(['*Dự báo dựa trên giả định thị trường tăng/giảm*'])
+            writer.writerow([])
+            
+            scenarios = [-30, -20, -10, 10, 20, 30]
+            writer.writerow(['Kịch bản', 'Giá trị danh mục', 'Lợi nhuận', 'Tỷ suất'])
+            
+            for scenario in scenarios:
+                multiplier = 1 + (scenario / 100)
+                projected_value = total_current * multiplier
+                projected_profit = projected_value - total_invest
+                projected_pct = (projected_profit / total_invest * 100) if total_invest > 0 else 0
+                
+                emoji = "📈" if scenario > 0 else "📉" if scenario < 0 else "➡️"
+                writer.writerow([
+                    f"{emoji} {scenario:+.0f}%",
+                    f"${projected_value:,.2f}",
+                    f"${projected_profit:,.2f}",
+                    f"{projected_pct:+.2f}%"
+                ])
+            
+            writer.writerow([])
+            
+            # =========================================
+            # 7. ĐÁNH GIÁ & KHUYẾN NGHỊ
+            # =========================================
+            writer.writerow(['='*80])
+            writer.writerow(['ĐÁNH GIÁ & KHUYẾN NGHỊ'])
+            writer.writerow(['='*80])
+            
+            # Đánh giá tổng quan
+            if total_profit > 0:
+                if total_profit_pct > 50:
+                    rating = "🚀 XUẤT SẮC - Lợi nhuận rất cao"
+                elif total_profit_pct > 20:
+                    rating = "✅ TỐT - Lợi nhuận khả quan"
+                elif total_profit_pct > 0:
+                    rating = "📊 TẠM ỔN - Có lợi nhuận nhẹ"
+            else:
+                if total_profit_pct < -50:
+                    rating = "🔴 RỦI RO CAO - Lỗ nặng"
+                elif total_profit_pct < -20:
+                    rating = "⚠️ CẦN XEM XÉT - Lỗ đáng kể"
+                else:
+                    rating = "📉 ĐANG LỖ NHẸ"
+            
+            writer.writerow(['Đánh giá tổng quan:', rating])
+            writer.writerow([])
+            
+            # Khuyến nghị chi tiết
+            writer.writerow(['KHUYẾN NGHỊ:'])
+            
+            if sorted_coins and sorted_coins[0][1]['profit'] > 0:
+                best_coin = sorted_coins[0]
+                writer.writerow([f'• {best_coin[0]}: Lời ${best_coin[1]["profit"]:,.2f} - Có thể chốt lời một phần'])
+            
+            if sorted_coins and sorted_coins[-1][1]['profit'] < 0:
+                worst_coin = sorted_coins[-1]
+                writer.writerow([f'• {worst_coin[0]}: Lỗ ${abs(worst_coin[1]["profit"]):,.2f} - Cân nhắc cắt lỗ hoặc đợi hồi'])
+            
+            if len(all_coins) < 3:
+                writer.writerow(['• Danh mục chưa đa dạng, nên đầu tư thêm các coin khác'])
+            
+            for symbol, data in all_coins.items():
+                weight = (data['current'] / total_current * 100) if total_current > 0 else 0
+                if weight > 50:
+                    writer.writerow([f'• {symbol} chiếm {weight:.1f}% danh mục - Rủi ro tập trung cao'])
+            
+            writer.writerow([])
+            writer.writerow(['='*80])
+            writer.writerow(['KẾT THÚC BÁO CÁO'])
+            writer.writerow(['='*80])
+            
+            # Lấy nội dung CSV
+            csv_content = csv_buffer.getvalue()
+            
+            # Nếu có password, tạo ZIP mã hóa
+            if password and HAS_PYZIPPER:
+                return create_encrypted_zip(csv_content, f"master_report_{user_id}.csv", password)
+            
+            return csv_content
+            
+        except Exception as e:
+            logger.error(f"❌ Lỗi tạo master report: {e}")
+            return None
+    
+    def create_encrypted_zip(csv_content, filename, password):
+        """Tạo ZIP AES-256 từ nội dung CSV"""
+        try:
+            import pyzipper
+            import io
+            
+            zip_buffer = io.BytesIO()
+            timestamp = get_vn_time().strftime('%Y%m%d_%H%M%S')
+            zip_filename = f"master_report_{timestamp}.zip"
+            
+            with pyzipper.AESZipFile(
+                zip_buffer, 'w',
+                compression=pyzipper.ZIP_DEFLATED,
+                encryption=pyzipper.WZ_AES
+            ) as zip_file:
+                zip_file.setpassword(password.encode('utf-8'))
+                zip_file.writestr(filename, csv_content.encode('utf-8-sig'))
+            
+            zip_buffer.seek(0)
+            return {'content': zip_buffer, 'filename': zip_filename}
+        except Exception as e:
+            logger.error(f"❌ Lỗi tạo ZIP: {e}")
             return None
 
     @auto_update_user
@@ -5189,6 +5803,107 @@ try:
                 ]])
             )
 
+    @auto_update_user
+    @require_permission('view')
+    async def export_master_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Xuất báo cáo MASTER duy nhất: /export [password]"""
+        user_id = ctx.bot_data.get('effective_user_id', update.effective_user.id)
+        
+        # Kiểm tra nếu không có password
+        if not ctx.args:
+            await update.message.reply_text(
+                "🔐 *XUẤT BÁO CÁO MASTER*\n\n"
+                "Dùng lệnh: `/export [mật khẩu]`\n\n"
+                "*Ví dụ:*\n"
+                "• `/export 123456` - File ZIP có mật khẩu (tự xóa sau 30s)\n"
+                "• `/export 0` - File CSV không mã hóa\n\n"
+                "*File báo cáo bao gồm:*\n"
+                "✅ Danh sách giao dịch chi tiết\n"
+                "✅ Phân tích lợi nhuận từng coin\n"
+                "✅ Tổng kết danh mục đầu tư\n"
+                "✅ Top 5 coin lời nhất, lỗ nhất\n"
+                "✅ Phân tích theo thời gian\n"
+                "✅ Dự báo kịch bản +/-30%\n"
+                "✅ Đánh giá & khuyến nghị\n\n"
+                f"🕐 {format_vn_time_short()}",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+        
+        password = ctx.args[0]
+        msg = await update.message.reply_text("🔄 Đang tạo báo cáo MASTER...")
+        
+        try:
+            # Tạo báo cáo master
+            result = generate_master_report(user_id, password if password != '0' else None)
+            
+            if not result:
+                await msg.edit_text("❌ Không thể tạo báo cáo!")
+                return
+            
+            timestamp = get_vn_time().strftime('%Y%m%d_%H%M%S')
+            
+            # Nếu có password và password != '0' -> gửi ZIP
+            if password != '0' and HAS_PYZIPPER and isinstance(result, dict):
+                # Gửi file ZIP
+                sent_message = await update.message.reply_document(
+                    document=result['content'],
+                    filename=result['filename'],
+                    caption=f"🔐 *BÁO CÁO MASTER ĐÃ MÃ HÓA*\n"
+                            f"━━━━━━━━━━━━━━━━\n\n"
+                            f"✅ *Số giao dịch:* {len(get_transaction_detail(user_id))}\n"
+                            f"🔑 *Mật khẩu:* `{password}`\n"
+                            f"📁 *File:* `{result['filename']}`\n\n"
+                            f"📊 *Nội dung:*\n"
+                            f"• Phân tích lợi nhuận chi tiết\n"
+                            f"• Dự báo kịch bản thị trường\n"
+                            f"• Khuyến nghị đầu tư\n\n"
+                            f"⚠️ *TỰ ĐỘNG XÓA sau 30 giây*\n"
+                            f"• Hãy tải file ngay!\n\n"
+                            f"🕐 {format_vn_time()}",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                
+                # Xóa tin nhắn lệnh gốc (chứa mật khẩu)
+                try:
+                    await update.message.delete()
+                    logger.info(f"✅ Đã xóa tin nhắn lệnh gốc của user {user_id}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Không thể xóa tin nhắn lệnh gốc: {e}")
+                    
+                # Tự động xóa tin nhắn chứa file sau 30s
+                asyncio.create_task(auto_delete_message(ctx, update.effective_chat.id, sent_message.message_id, 30))
+            
+            else:
+                # Gửi CSV thường
+                filename = f"master_report_{user_id}_{timestamp}.csv"
+                await update.message.reply_document(
+                    document=io.BytesIO(result.encode('utf-8-sig')),
+                    filename=filename,
+                    caption=f"📊 *BÁO CÁO MASTER*\n"
+                            f"━━━━━━━━━━━━━━━━\n\n"
+                            f"✅ *Số giao dịch:* {len(get_transaction_detail(user_id))}\n"
+                            f"📁 *File:* `{filename}`\n\n"
+                            f"📊 *Nội dung:*\n"
+                            f"• Phân tích lợi nhuận chi tiết\n"
+                            f"• Dự báo kịch bản thị trường\n"
+                            f"• Khuyến nghị đầu tư\n\n"
+                            f"🕐 {format_vn_time()}",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            
+            await msg.delete()
+            logger.info(f"✅ User {user_id} đã xuất báo cáo master thành công")
+            
+        except Exception as e:
+            logger.error(f"❌ Lỗi export master: {e}", exc_info=True)
+            await msg.edit_text(
+                f"❌ *LỖI KHI XUẤT BÁO CÁO*\n\n"
+                f"Lỗi: `{str(e)[:200]}`\n\n"
+                f"Vui lòng thử lại sau.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+
     async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
@@ -5472,7 +6187,32 @@ try:
                             [InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
                 await safe_edit_message(query, text, reply_markup=InlineKeyboardMarkup(keyboard))
                 return
-            
+
+            # ===========================================
+            # NÚT XUẤT MASTER DUY NHẤT - THÊM VÀO ĐÂY
+            # ===========================================
+            if data == "export_master":
+                await safe_edit_message(
+                    query,
+                    "🔐 *XUẤT BÁO CÁO MASTER*\n\n"
+                    "Dùng lệnh: `/export [mật khẩu]`\n\n"
+                    "*Ví dụ:*\n"
+                    "• `/export 123456` - File ZIP có mật khẩu (tự xóa sau 30s)\n"
+                    "• `/export 0` - File CSV không mã hóa\n\n"
+                    "*Báo cáo bao gồm TẤT CẢ:*\n"
+                    "📊 Danh sách giao dịch chi tiết\n"
+                    "📈 Phân tích lợi nhuận từng coin\n"
+                    "📉 Top 5 coin lời nhất, lỗ nhất\n"
+                    "🔮 Dự báo kịch bản +/-30%\n"
+                    "💡 Đánh giá & khuyến nghị đầu tư\n\n"
+                    f"🕐 {format_vn_time_short()}",
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("🔙 Về menu đầu tư", callback_data="back_to_invest")
+                    ]])
+                )
+                return
+                
             # ===========================================
             # NHÓM 4: XỬ LÝ XEM PORTFOLIO - CHỈ XEM CỦA CHỦ SỞ HỮU
             # ===========================================
@@ -6766,6 +7506,7 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
             app.add_handler(CommandHandler("suachi", edit_expense_command))
             app.add_handler(CommandHandler("grant", grant_command))
             app.add_handler(CommandHandler("myperm", myperm_command))
+            app.add_handler(CommandHandler("export", export_master_command))
             app.add_handler(CommandHandler("export_secure", export_secure_command))
             app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_chat_members))
             app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
