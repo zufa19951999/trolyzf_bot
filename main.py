@@ -1878,7 +1878,7 @@ try:
         
         return InlineKeyboardMarkup(keyboard)
 
-    def get_expense_menu_keyboard():
+    def def get_expense_menu_keyboard():
         keyboard = [
             [InlineKeyboardButton("💰 THU NHẬP", callback_data="expense_income_menu"),
              InlineKeyboardButton("💸 CHI TIÊU", callback_data="expense_expense_menu")],
@@ -2685,29 +2685,31 @@ try:
         user_id = update.effective_user.id
         chat_id = update.effective_chat.id
         
-        help_msg = "📘 *HƯỚNG DẪN*\n\n"
+        help_msg = "📘 *HƯỚNG DẪN SỬ DỤNG BOT*\n━━━━━━━━━━━━━━━━\n\n"
         
-        if is_owner(user_id):
-            help_msg += ("*👑 OWNER COMMANDS:*\n"
-                         "• `/owner` - Panel quản lý\n"
-                         "• `/owner addstaff @user` - Thêm nhân viên\n"
-                         "• `/owner approve @user` - Duyệt user\n"
-                         "• `/owner listpending` - DS chờ duyệt\n\n")
+        help_msg += (
+            "*💰 ĐẦU TƯ COIN:*\n"
+            "• `/s btc eth` - Xem giá coin\n"
+            "• `/usdt` - Tỷ giá USDT/VND\n"
+            "• `/buy btc 0.5 40000` - Mua coin\n"
+            "• `/sell btc 0.2` - Bán coin\n"
+            "• `/alert BTC above 50000` - Cảnh báo giá\n\n"
+            
+            "*💸 QUẢN LÝ CHI TIÊU:*\n"
+            "• `tn 500000` - Thêm thu nhập\n"
+            "• `dm Ăn uống 3000000` - Tạo danh mục\n"
+            "• `ct 1 50000` - Thêm chi tiêu\n"
+            "• `ds` - Xem giao dịch gần đây\n"
+            "• `/balance` - Xem cân đối thu chi\n\n"
+            
+            "*🔐 QUẢN LÝ NHÓM:*\n"
+            "• `/grant @user view` - Cấp quyền xem\n"
+            "• `/myperm` - Kiểm tra quyền của bạn\n"
+            "• `/groupinfo` - Thông tin nhóm\n\n"
+            
+            f"🕐 {format_vn_time()}"
+        )
         
-        if check_user_access(chat_id, user_id, 'user'):
-            help_msg += ("*ĐẦU TƯ COIN:*\n"
-                         "• `/s btc eth` - Xem giá coin\n"
-                         "• `/usdt` - Tỷ giá USDT/VND\n"
-                         "• `/buy btc 0.5 40000` - Mua coin\n"
-                         "• `/sell btc 0.2` - Bán coin\n\n")
-        
-        if check_user_access(chat_id, user_id, 'staff'):
-            help_msg += ("*👥 NHÂN VIÊN:*\n"
-                         "• `/edit` - Sửa giao dịch\n"
-                         "• `/del` - Xóa giao dịch\n"
-                         "• `/view @user` - Xem portfolio người khác\n\n")
-        
-        help_msg += f"\n🕐 {format_vn_time()}"
         await update.message.reply_text(help_msg, parse_mode=ParseMode.MARKDOWN)
 
     @auto_update_user
@@ -4658,7 +4660,7 @@ try:
         user_id = update.effective_user.id
         chat_id = update.effective_chat.id
         
-        logger.info(f"📨 Tin nhắn từ user {user_id} trong {chat_type}: {text}")
+        logger.info(f"📨 Tin nhắn từ user {user_id} trong {chat_type}: '{text}'")
         
         # TRONG GROUP: Kiểm tra quyền trước khi xử lý
         if chat_type in ['group', 'supergroup']:
@@ -4685,7 +4687,7 @@ try:
             await expense_shortcut_handler(update, ctx)
             return
         
-        # Xử lý menu chính
+        # Xử lý menu chính - SO SÁNH CHÍNH XÁC
         if text == "💰 ĐẦU TƯ COIN":
             logger.info(f"💰 User {user_id} chọn menu ĐẦU TƯ COIN")
             await update.message.reply_text(
@@ -4710,7 +4712,7 @@ try:
             return
         
         # Nếu không khớp với bất kỳ điều kiện nào
-        logger.info(f"❓ Tin nhắn không xác định: {text}")
+        logger.info(f"❓ Tin nhắn không xác định: '{text}'")
 
     async def export_csv_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
