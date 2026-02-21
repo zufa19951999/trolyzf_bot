@@ -1892,17 +1892,15 @@ try:
              InlineKeyboardButton("📊 Thống kê", callback_data="show_stats")],
             [InlineKeyboardButton("🔔 Cảnh báo giá", callback_data="show_alerts"),
              InlineKeyboardButton("📥 Xuất CSV", callback_data="export_csv")],
-            [InlineKeyboardButton("➕ Mua coin", callback_data="show_buy"),
-             InlineKeyboardButton("➖ Bán coin", callback_data="show_sell")]
+            [InlineKeyboardButton("🔐 Xuất mã hóa", callback_data="export_secure"),  # <-- NÚT MỚI
+             InlineKeyboardButton("➕ Mua coin", callback_data="show_buy")],
+            [InlineKeyboardButton("➖ Bán coin", callback_data="show_sell")]
         ]
         
-        # Chỉ hiển thị nút ADMIN nếu đang ở trong group và có quyền
+        # Thêm nút ADMIN nếu cần
         if group_id and user_id:
-            try:
-                if chat_type in ['group', 'supergroup'] and check_permission(group_id, user_id, 'view'):
-                    keyboard.append([InlineKeyboardButton("👑 ADMIN", callback_data="admin_panel")])
-            except:
-                pass
+            if chat_type in ['group', 'supergroup'] and check_permission(group_id, user_id, 'view'):
+                keyboard.append([InlineKeyboardButton("👑 ADMIN", callback_data="admin_panel")])
         
         return InlineKeyboardMarkup(keyboard)
 
@@ -4985,6 +4983,153 @@ try:
             except:
                 pass
 
+    @auto_update_user
+    @require_permission('view')
+    async def export_secure_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Xuất CSV có mật khẩu: /export_secure [password]"""
+        user_id = ctx.bot_data.get('effective_user_id', update.effective_user.id)
+        
+        # Kiểm tra pyzipper đã được cài chưa
+        if not HAS_PYZIPPER:
+            await update.message.reply_text(
+                "❌ *TÍNH NĂNG CHƯA SẴN SÀNG*\n\n"
+                "Thư viện mã hóa chưa được cài đặt.\n"
+                "Vui lòng dùng `/export_csv` để xuất không mã hóa.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+        
+        # Hướng dẫn nếu thiếu password
+        if not ctx.args:
+            # Tạo keyboard có nút hủy
+            keyboard = [[InlineKeyboardButton("🔙 Hủy", callback_data="back_to_invest")]]
+            
+            await update.message.reply_text(
+                "🔐 *XUẤT CSV CÓ MẬT KHẨU*\n\n"
+                "*Cú pháp:*\n"
+                "`/export_secure [mật khẩu]`\n\n"
+                "*Ví dụ:*\n"
+                "• `/export_secure 123456`\n"
+                "• `/export_secure mysecretpass`\n"
+                "• `/export_secure 12345678`\n\n"
+                "*Lưu ý:*\n"
+                "• File sẽ được nén ZIP AES-256\n"
+                "• Có thể mở bằng WinRAR, 7-Zip\n"
+                "• Mật khẩu sẽ hiện trong chat\n"
+                "• **Nhớ xóa tin nhắn sau khi tải!**\n\n"
+                f"🕐 {format_vn_time_short()}",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return
+        
+        password = ctx.args[0]
+        
+        # Cảnh báo nếu password quá ngắn
+        if len(password) < 4:
+            await update.message.reply_text("⚠️ Mật khẩu nên có ít nhất 4 ký tự để bảo mật tốt hơn!")
+        
+        msg = await update.message.reply_text("🔄 Đang tạo file bảo mật...")
+        
+        try:
+            # Lấy dữ liệu portfolio
+            transactions = get_transaction_detail(user_id)
+            
+            if not transactions:
+                await msg.edit_text(
+                    "📭 Không có dữ liệu để xuất!",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")
+                    ]])
+                )
+                return
+            
+            # Tạo nội dung CSV
+            import csv
+            import io
+            
+            csv_buffer = io.StringIO()
+            writer = csv.writer(csv_buffer)
+            
+            # Ghi header
+            writer.writerow(['ID', 'Mã coin', 'Số lượng', 'Giá mua (USD)', 'Ngày mua', 'Tổng vốn (USD)'])
+            
+            # Ghi dữ liệu
+            for tx in transactions:
+                writer.writerow([
+                    tx[0],  # ID
+                    tx[1],  # Symbol
+                    f"{tx[2]:.8f}",  # Amount
+                    f"${tx[3]:,.2f}",  # Buy price
+                    tx[4],  # Buy date
+                    f"${tx[5]:,.2f}"  # Total cost
+                ])
+            
+            # Tạo tên file
+            timestamp = get_vn_time().strftime('%Y%m%d_%H%M%S')
+            csv_filename = f"portfolio_{user_id}_{timestamp}.csv"
+            zip_filename = f"portfolio_{user_id}_{timestamp}.zip"
+            
+            # Tạo ZIP có mật khẩu
+            zip_buffer = io.BytesIO()
+            
+            with pyzipper.AESZipFile(
+                zip_buffer, 
+                'w', 
+                compression=pyzipper.ZIP_DEFLATED, 
+                encryption=pyzipper.WZ_AES
+            ) as zip_file:
+                # Đặt mật khẩu
+                zip_file.setpassword(password.encode('utf-8'))
+                # Thêm file CSV vào ZIP
+                zip_file.writestr(csv_filename, csv_buffer.getvalue().encode('utf-8-sig'))
+            
+            # Chuẩn bị gửi file
+            zip_buffer.seek(0)
+            
+            # Tạo caption
+            caption = (
+                f"🔐 *FILE ĐÃ MÃ HÓA*\n"
+                f"━━━━━━━━━━━━━━━━\n\n"
+                f"✅ *Số giao dịch:* {len(transactions)}\n"
+                f"📁 *Tên file:* `{zip_filename}`\n"
+                f"🔑 *Mật khẩu:* `{password}`\n\n"
+                f"📊 *Cách mở file:*\n"
+                f"1. Tải file ZIP về máy\n"
+                f"2. Dùng WinRAR hoặc 7-Zip\n"
+                f"3. Nhập mật khẩu khi giải nén\n\n"
+                f"⚠️ *BẢO MẬT:*\n"
+                f"• Xóa tin nhắn này sau khi tải\n"
+                f"• Không chia sẻ mật khẩu với người khác\n\n"
+                f"🕐 {format_vn_time()}"
+            )
+            
+            # Gửi file
+            await update.message.reply_document(
+                document=zip_buffer,
+                filename=zip_filename,
+                caption=caption,
+                parse_mode=ParseMode.MARKDOWN
+            )
+            
+            # Xóa tin nhắn "Đang tạo..."
+            await msg.delete()
+            
+            # Log thành công
+            logger.info(f"✅ Exported secure ZIP for user {user_id} with {len(transactions)} transactions")
+            
+        except Exception as e:
+            logger.error(f"❌ Lỗi export secure: {e}", exc_info=True)
+            await msg.edit_text(
+                f"❌ *LỖI KHI XUẤT FILE*\n\n"
+                f"Lỗi: `{str(e)[:200]}`\n\n"
+                f"Vui lòng thử lại hoặc dùng `/export_csv`",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")
+                ]])
+            )
+
     async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
@@ -6043,6 +6188,25 @@ try:
                 
                 await safe_edit_message(query, balance_msg, reply_markup=InlineKeyboardMarkup(keyboard))
                 return
+
+            elif data == "export_secure":
+                await query.edit_message_text(
+                    "🔐 *XUẤT CSV CÓ MẬT KHẨU*\n\n"
+                    "Dùng lệnh: `/export_secure [mật khẩu]`\n\n"
+                    "*Ví dụ:*\n"
+                    "• `/export_secure 123456`\n"
+                    "• `/export_secure mysecretpass`\n\n"
+                    "*Tính năng:*\n"
+                    "• Mã hóa AES-256\n"
+                    "• File ZIP có mật khẩu\n"
+                    "• An toàn hơn CSV thường\n\n"
+                    f"🕐 {format_vn_time_short()}",
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")
+                    ]])
+                )
+                return
             
             # ===========================================
             # XỬ LÝ CALLBACK KHÔNG XÁC ĐỊNH
@@ -6543,6 +6707,7 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
             app.add_handler(CommandHandler("suachi", edit_expense_command))
             app.add_handler(CommandHandler("grant", grant_command))
             app.add_handler(CommandHandler("myperm", myperm_command))
+            app.add_handler(CommandHandler("export_secure", export_secure_command))
             app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_chat_members))
             app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
             app.add_handler(CallbackQueryHandler(handle_callback))
