@@ -2972,7 +2972,7 @@ try:
                 tx_id, symbol, amount, price, date, total, tx_owner_id = tx
                 
                 # Kiểm tra quyền xem
-                if tx_owner_id !=. target_user_id and not is_admin:
+                if tx_owner_id != target_user_id and not is_admin:
                     await update.message.reply_text("❌ Bạn không có quyền xem giao dịch này!")
                     return
                 
@@ -5378,7 +5378,7 @@ try:
                 tx_id, symbol, amount, price, date, total, tx_owner_id = tx
                 
                 # Kiểm tra quyền xem/sửa - chỉ cho phép chủ sở hữu hoặc admin
-                if tx_owner_id !=. target_user_id and not is_admin:
+                if tx_owner_id != target_user_id and not is_admin:
                     await safe_edit_message(query, "❌ Bạn không có quyền xem giao dịch này!")
                     return
                 
