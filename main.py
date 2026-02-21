@@ -1117,31 +1117,26 @@ try:
             current_user_id = update.effective_user.id
             chat_id = update.effective_chat.id
             
-            # QUAN TRỌNG: XÓA TẤT CẢ DỮ LIỆU CŨ TRONG CONTEXT
-            # Đảm bảo không bị ảnh hưởng giữa các chat
-            if 'is_admin' in context.bot_data:
-                del context.bot_data['is_admin']
-            if 'effective_user_id' in context.bot_data:
-                del context.bot_data['effective_user_id']
+            # XÓA DỮ LIỆU CŨ - QUAN TRỌNG
+            context.bot_data.clear()
             
-            # PRIVATE CHAT: LUÔN TỰ QUẢN LÝ, KHÔNG LIÊN QUAN ĐẾN GROUP
+            # PRIVATE CHAT: LUÔN TỰ QUẢN LÝ
             if chat_type == 'private':
-                effective_user_id = current_user_id
-                context.bot_data['effective_user_id'] = effective_user_id
+                context.bot_data['effective_user_id'] = current_user_id
                 context.bot_data['current_user_id'] = current_user_id
                 context.bot_data['chat_type'] = chat_type
-                context.bot_data['is_admin'] = False  # KHÔNG phải admin trong private
-                logger.info(f"💬 Private chat: user {current_user_id} tự quản lý (KHÔNG phải admin)")
+                context.bot_data['is_admin'] = False
+                context.bot_data['is_owner'] = False
+                logger.info(f"💬 PRIVATE: user {current_user_id} tự quản lý")
                 return await func(update, context, *args, **kwargs)
             
-            # TRONG GROUP: Xác định owner và kiểm tra quyền
+            # TRONG GROUP
             elif chat_type in ['group', 'supergroup']:
                 owner_id = get_group_owner(chat_id)
                 
                 if not owner_id:
                     await update.message.reply_text(
                         f"❌ *GROUP CHƯA ĐƯỢC CẤU HÌNH*\n\n"
-                        f"Group này chưa được cài đặt chủ sở hữu!\n"
                         f"Vui lòng liên hệ @{OWNER_USERNAME} để thiết lập.\n\n"
                         f"🕐 {format_vn_time()}",
                         parse_mode=ParseMode.MARKDOWN
@@ -1149,33 +1144,37 @@ try:
                     return
                 
                 # Kiểm tra quyền trong group
-                has_view_permission = check_permission(chat_id, current_user_id, 'view')
+                has_permission = check_permission(chat_id, current_user_id, 'view')
                 
-                if not has_view_permission:
-                    # Nếu không có quyền, vẫn set effective_user_id là chính họ
-                    # Decorator require_permission sẽ xử lý việc chặn
-                    effective_user_id = current_user_id
-                    is_admin = False
-                    logger.info(f"👤 User {current_user_id} chưa có quyền trong group {chat_id}")
+                if not has_permission:
+                    context.bot_data['effective_user_id'] = current_user_id
+                    context.bot_data['current_user_id'] = current_user_id
+                    context.bot_data['chat_type'] = chat_type
+                    context.bot_data['is_admin'] = False
+                    context.bot_data['is_owner'] = (current_user_id == owner_id)
+                    logger.info(f"👤 GROUP: user {current_user_id} chưa có quyền")
+                    return await func(update, context, *args, **kwargs)
+                
+                # Kiểm tra quyền admin
+                is_admin = check_permission(chat_id, current_user_id, 'edit') or \
+                          check_permission(chat_id, current_user_id, 'delete') or \
+                          check_permission(chat_id, current_user_id, 'manage')
+                
+                if is_admin or current_user_id == owner_id:
+                    # Admin hoặc owner: thao tác trên dữ liệu của owner
+                    context.bot_data['effective_user_id'] = owner_id
+                    context.bot_data['is_admin'] = True
+                    context.bot_data['is_owner'] = (current_user_id == owner_id)
+                    logger.info(f"👑 GROUP: admin {current_user_id} thao tác trên dữ liệu owner {owner_id}")
                 else:
-                    # Kiểm tra quyền admin
-                    is_admin = check_permission(chat_id, current_user_id, 'edit') or \
-                              check_permission(chat_id, current_user_id, 'delete') or \
-                              check_permission(chat_id, current_user_id, 'manage')
-                    
-                    if is_admin:
-                        # Admin có quyền thao tác trên dữ liệu của chủ sở hữu
-                        effective_user_id = owner_id
-                        logger.info(f"👑 Admin {current_user_id} đang thao tác trên dữ liệu của owner {owner_id}")
-                    else:
-                        # User thường chỉ xem được dữ liệu của chính mình
-                        effective_user_id = current_user_id
-                        logger.info(f"👤 User {current_user_id} tự quản lý dữ liệu riêng trong group")
+                    # User thường: tự quản lý
+                    context.bot_data['effective_user_id'] = current_user_id
+                    context.bot_data['is_admin'] = False
+                    context.bot_data['is_owner'] = False
+                    logger.info(f"👤 GROUP: user {current_user_id} tự quản lý")
                 
-                context.bot_data['effective_user_id'] = effective_user_id
                 context.bot_data['current_user_id'] = current_user_id
                 context.bot_data['chat_type'] = chat_type
-                context.bot_data['is_admin'] = is_admin if has_view_permission else False
                 
                 return await func(update, context, *args, **kwargs)
             
@@ -1185,6 +1184,7 @@ try:
                 context.bot_data['current_user_id'] = current_user_id
                 context.bot_data['chat_type'] = chat_type
                 context.bot_data['is_admin'] = False
+                context.bot_data['is_owner'] = False
                 return await func(update, context, *args, **kwargs)
                 
         return wrapper
@@ -2781,7 +2781,18 @@ try:
     @auto_update_user
     @require_permission('edit')
     async def buy_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        owner_id = ctx.bot_data.get('effective_user_id', update.effective_user.id)
+        # Xác định user_id thực sự cần thêm giao dịch
+        chat_type = update.effective_chat.type
+        current_user_id = update.effective_user.id
+        
+        if chat_type == 'private':
+            # Private chat: thêm cho chính mình
+            target_user_id = current_user_id
+            logger.info(f"💬 PRIVATE: mua coin cho user {target_user_id}")
+        else:
+            # Group chat: thêm cho chủ sở hữu (nếu có quyền)
+            target_user_id = ctx.bot_data.get('effective_user_id', current_user_id)
+            logger.info(f"👥 GROUP: mua coin cho owner {target_user_id}")
         
         if len(ctx.args) < 3:
             return await update.message.reply_text("❌ /buy btc 0.5 40000")
@@ -2801,19 +2812,24 @@ try:
         if not price_data:
             return await update.message.reply_text(f"❌ Không thể lấy giá *{symbol}*", parse_mode='Markdown')
         
-        if add_transaction(owner_id, symbol, amount, buy_price):
+        if add_transaction(target_user_id, symbol, amount, buy_price):
             current_price = price_data['p']
             profit = (current_price - buy_price) * amount
             profit_percent = ((current_price - buy_price) / buy_price) * 100
             
             added_by = f" (thêm bởi @{update.effective_user.username})" if update.effective_user.username else ""
             
+            # Thông báo ai là người sở hữu
+            owner_info = ""
+            if chat_type != 'private' and target_user_id != current_user_id:
+                owner_info = f"\n📌 Dữ liệu thuộc về chủ sở hữu group"
+            
             msg = (f"✅ *ĐÃ MUA {symbol}*{added_by}\n━━━━━━━━━━━━━━━━\n\n"
                    f"📊 SL: `{amount:.4f}`\n"
                    f"💰 Giá mua: `{fmt_price(buy_price)}`\n"
                    f"💵 Vốn: `{fmt_price(amount * buy_price)}`\n"
                    f"📈 Giá hiện: `{fmt_price(current_price)}`\n"
-                   f"{'✅' if profit>=0 else '❌'} LN: `{fmt_price(profit)}` ({profit_percent:+.2f}%)\n\n"
+                   f"{'✅' if profit>=0 else '❌'} LN: `{fmt_price(profit)}` ({profit_percent:+.2f}%){owner_info}\n\n"
                    f"🕐 {format_vn_time()}")
             await update.message.reply_text(msg, parse_mode='Markdown')
         else:
@@ -2822,7 +2838,16 @@ try:
     @auto_update_user
     @require_permission('edit')
     async def sell_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        owner_id = ctx.bot_data.get('effective_user_id', update.effective_user.id)
+        # Xác định user_id thực sự
+        chat_type = update.effective_chat.type
+        current_user_id = update.effective_user.id
+        
+        if chat_type == 'private':
+            target_user_id = current_user_id
+            logger.info(f"💬 PRIVATE: bán coin cho user {target_user_id}")
+        else:
+            target_user_id = ctx.bot_data.get('effective_user_id', current_user_id)
+            logger.info(f"👥 GROUP: bán coin cho owner {target_user_id}")
         
         if len(ctx.args) < 2:
             return await update.message.reply_text("❌ /sell btc 0.2")
@@ -2837,7 +2862,7 @@ try:
         if sell_amount <= 0:
             return await update.message.reply_text("❌ Số lượng phải > 0")
         
-        portfolio_data = get_portfolio(owner_id)
+        portfolio_data = get_portfolio(target_user_id)
         if not portfolio_data:
             return await update.message.reply_text("📭 Danh mục trống!")
         
@@ -2906,24 +2931,35 @@ try:
     @auto_update_user
     @require_permission('edit')
     async def edit_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        # QUAN TRỌNG: Lấy owner_id (chủ sở hữu) chứ không phải user_id hiện tại
-        owner_id = ctx.bot_data.get('effective_user_id')
-        current_user_id = ctx.bot_data.get('current_user_id', update.effective_user.id)
+        # Xác định user_id thực sự cần sửa
+        chat_type = update.effective_chat.type
+        current_user_id = update.effective_user.id
         chat_id = update.effective_chat.id
         
-        logger.info(f"✏️ edit_command: owner_id={owner_id}, current_user={current_user_id}")
+        if chat_type == 'private':
+            # Private chat: sửa dữ liệu của chính mình
+            target_user_id = current_user_id
+            logger.info(f"💬 PRIVATE: sửa giao dịch cho user {target_user_id}")
+        else:
+            # Group chat: sửa dữ liệu của chủ sở hữu (nếu có quyền)
+            target_user_id = ctx.bot_data.get('effective_user_id', current_user_id)
+            logger.info(f"👥 GROUP: sửa giao dịch cho owner {target_user_id}")
         
-        # THÊM: Kiểm tra quyền admin
-        is_admin = check_permission(chat_id, current_user_id, 'edit') or \
-                   check_permission(chat_id, current_user_id, 'delete') or \
-                   check_permission(chat_id, current_user_id, 'manage')
+        logger.info(f"✏️ edit_command: target_user_id={target_user_id}, current_user={current_user_id}")
+        
+        # Kiểm tra quyền admin trong group
+        is_admin = False
+        if chat_type in ['group', 'supergroup']:
+            is_admin = check_permission(chat_id, current_user_id, 'edit') or \
+                       check_permission(chat_id, current_user_id, 'delete') or \
+                       check_permission(chat_id, current_user_id, 'manage')
         
         logger.info(f"🔑 is_admin: {is_admin}")
         
         # Nếu không có tham số, hiển thị danh sách giao dịch
         if not ctx.args:
-            # Lấy danh sách giao dịch của OWNER
-            transactions = get_transaction_detail(owner_id)
+            # Lấy danh sách giao dịch của target_user
+            transactions = get_transaction_detail(target_user_id)
             
             if not transactions:
                 await update.message.reply_text("📭 Danh mục trống!")
@@ -2991,7 +3027,7 @@ try:
                        f"{'✅' if profit>=0 else '❌'} Lợi nhuận: `{fmt_price(profit)}` ({profit_percent:+.2f}%)\n\n")
                 
                 # Thêm hướng dẫn sửa/xóa
-                if tx_owner_id == owner_id or is_admin:
+                if tx_owner_id == target_user_id or is_admin:
                     msg += f"*Sửa:* `/edit {tx_id} [sl] [giá]`\n"
                     msg += f"*Xóa:* `/del {tx_id}`\n\n"
                 else:
@@ -3001,7 +3037,7 @@ try:
                 
                 # Tạo keyboard
                 keyboard = []
-                if tx_owner_id == owner_id or is_admin:
+                if tx_owner_id == target_user_id or is_admin:
                     keyboard.append([
                         InlineKeyboardButton("✏️ Sửa", callback_data=f"edit_{tx_id}"),
                         InlineKeyboardButton("🗑 Xóa", callback_data=f"del_{tx_id}")
@@ -3040,9 +3076,9 @@ try:
                 
                 # Kiểm tra quyền sửa
                 can_edit = False
-                if tx_owner_id == owner_id:
+                if tx_owner_id == target_user_id:
                     can_edit = True
-                    logger.info(f"✅ User {current_user_id} là owner, được sửa #{tx_id}")
+                    logger.info(f"✅ User {current_user_id} là chủ, được sửa #{tx_id}")
                 elif is_admin:
                     can_edit = True
                     logger.info(f"✅ Admin {current_user_id} có quyền, được sửa #{tx_id}")
@@ -3080,19 +3116,31 @@ try:
     @auto_update_user
     @require_permission('delete')
     async def delete_tx_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        owner_id = ctx.bot_data.get('effective_user_id')
-        current_user_id = ctx.bot_data.get('current_user_id', update.effective_user.id)
+        # Xác định user_id thực sự cần xóa
+        chat_type = update.effective_chat.type
+        current_user_id = update.effective_user.id
         chat_id = update.effective_chat.id
         
-        logger.info(f"🗑 delete_tx_command: owner_id={owner_id}, current_user={current_user_id}")
+        if chat_type == 'private':
+            # Private chat: xóa dữ liệu của chính mình
+            target_user_id = current_user_id
+            logger.info(f"💬 PRIVATE: xóa giao dịch cho user {target_user_id}")
+        else:
+            # Group chat: xóa dữ liệu của chủ sở hữu (nếu có quyền)
+            target_user_id = ctx.bot_data.get('effective_user_id', current_user_id)
+            logger.info(f"👥 GROUP: xóa giao dịch cho owner {target_user_id}")
         
-        # Kiểm tra quyền admin
-        is_admin = check_permission(chat_id, current_user_id, 'delete') or \
-                   check_permission(chat_id, current_user_id, 'manage')
+        logger.info(f"🗑 delete_tx_command: target_user_id={target_user_id}, current_user={current_user_id}")
+        
+        # Kiểm tra quyền admin trong group
+        is_admin = False
+        if chat_type in ['group', 'supergroup']:
+            is_admin = check_permission(chat_id, current_user_id, 'delete') or \
+                       check_permission(chat_id, current_user_id, 'manage')
         
         if not ctx.args:
             # Hiển thị danh sách giao dịch để chọn xóa
-            transactions = get_transaction_detail(owner_id)
+            transactions = get_transaction_detail(target_user_id)
             
             if not transactions:
                 await update.message.reply_text("📭 Danh mục trống!")
@@ -3140,9 +3188,9 @@ try:
             # Kiểm tra quyền xóa
             can_delete = False
             
-            if tx_owner_id == owner_id:
+            if tx_owner_id == target_user_id:
                 can_delete = True
-                logger.info(f"✅ User {current_user_id} là owner, được xóa #{tx_id}")
+                logger.info(f"✅ User {current_user_id} là chủ, được xóa #{tx_id}")
             elif is_admin:
                 can_delete = True
                 logger.info(f"✅ Admin {current_user_id} có quyền delete, được xóa #{tx_id}")
@@ -3162,7 +3210,7 @@ try:
                                            reply_markup=InlineKeyboardMarkup(keyboard))
         except ValueError:
             await update.message.reply_text("❌ ID không hợp lệ")
-
+        
     @auto_update_user
     @require_permission('view')
     async def alert_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -4425,9 +4473,23 @@ try:
                 await update.message.reply_text("❌ Không tìm thấy quyền!")
 
     async def expense_shortcut_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        owner_id = ctx.bot_data.get('effective_user_id', update.effective_user.id)
+        # Xác định user_id thực sự
+        chat_type = update.effective_chat.type
+        current_user_id = update.effective_user.id
+        chat_id = update.effective_chat.id
+        
+        if chat_type == 'private':
+            # Private chat: thêm cho chính mình
+            target_user_id = current_user_id
+            logger.info(f"💬 PRIVATE: thêm chi tiêu cho user {target_user_id}")
+        else:
+            # Group chat: thêm cho chủ sở hữu (nếu có quyền)
+            target_user_id = ctx.bot_data.get('effective_user_id', current_user_id)
+            logger.info(f"👥 GROUP: thêm chi tiêu cho owner {target_user_id}")
+        
         text = update.message.text.strip()
         
+        # ==================== THÊM THU NHẬP (tn) ====================
         if text.startswith('tn '):
             parts = text.split()
             if len(parts) < 2:
@@ -4454,13 +4516,26 @@ try:
                         source = parts[2]
                         note = " ".join(parts[3:]) if len(parts) > 3 else ""
                 
-                if add_income(owner_id, amount, source, currency, note):
-                    await update.message.reply_text(f"✅ *ĐÃ THÊM THU NHẬP*\n━━━━━━━━━━━━━━━━\n\n💰 Số tiền: *{format_currency_simple(amount, currency)}*\n📌 Nguồn: *{source}*\n📝 Ghi chú: *{note if note else 'Không có'}*\n\n🕐 {format_vn_time()}", parse_mode=ParseMode.MARKDOWN)
+                if add_income(target_user_id, amount, source, currency, note):
+                    # Thông báo ai là người sở hữu
+                    owner_info = ""
+                    if chat_type != 'private' and target_user_id != current_user_id:
+                        owner_info = "\n📌 Dữ liệu thuộc về chủ sở hữu group"
+                    
+                    await update.message.reply_text(
+                        f"✅ *ĐÃ THÊM THU NHẬP*\n━━━━━━━━━━━━━━━━\n\n"
+                        f"💰 Số tiền: *{format_currency_simple(amount, currency)}*\n"
+                        f"📌 Nguồn: *{source}*\n"
+                        f"📝 Ghi chú: *{note if note else 'Không có'}*{owner_info}\n\n"
+                        f"🕐 {format_vn_time()}", 
+                        parse_mode=ParseMode.MARKDOWN
+                    )
                 else:
                     await update.message.reply_text("❌ Lỗi khi thêm thu nhập!")
             except ValueError:
                 await update.message.reply_text("❌ Số tiền không hợp lệ!")
         
+        # ==================== THÊM DANH MỤC (dm) ====================
         elif text.startswith('dm '):
             parts = text.split()
             if len(parts) < 2:
@@ -4476,11 +4551,22 @@ try:
                     await update.message.reply_text("❌ Ngân sách không hợp lệ!")
                     return
             
-            if add_expense_category(owner_id, name, budget):
-                await update.message.reply_text(f"✅ *ĐÃ THÊM DANH MỤC*\n━━━━━━━━━━━━━━━━\n\n📋 Tên: *{name.upper()}*\n💰 Budget: {format_currency_simple(budget, 'VND')}\n\n🕐 {format_vn_time()}", parse_mode=ParseMode.MARKDOWN)
+            if add_expense_category(target_user_id, name, budget):
+                owner_info = ""
+                if chat_type != 'private' and target_user_id != current_user_id:
+                    owner_info = "\n📌 Dữ liệu thuộc về chủ sở hữu group"
+                
+                await update.message.reply_text(
+                    f"✅ *ĐÃ THÊM DANH MỤC*\n━━━━━━━━━━━━━━━━\n\n"
+                    f"📋 Tên: *{name.upper()}*\n"
+                    f"💰 Budget: {format_currency_simple(budget, 'VND')}{owner_info}\n\n"
+                    f"🕐 {format_vn_time()}", 
+                    parse_mode=ParseMode.MARKDOWN
+                )
             else:
                 await update.message.reply_text("❌ Lỗi khi thêm danh mục!")
         
+        # ==================== THÊM CHI TIÊU (ct) ====================
         elif text.startswith('ct '):
             parts = text.split()
             if len(parts) < 3:
@@ -4504,7 +4590,7 @@ try:
                 
                 note = " ".join(parts[start_idx:]) if len(parts) > start_idx else ""
                 
-                categories = get_expense_categories(owner_id)
+                categories = get_expense_categories(target_user_id)
                 category_exists = False
                 category_name = ""
                 for cat in categories:
@@ -4517,16 +4603,28 @@ try:
                     await update.message.reply_text(f"❌ Không tìm thấy danh mục #{category_id}!")
                     return
                 
-                if add_expense(owner_id, category_id, amount, currency, note):
-                    await update.message.reply_text(f"✅ *ĐÃ THÊM CHI TIÊU*\n━━━━━━━━━━━━━━━━\n\n💰 Số tiền: *{format_currency_simple(amount, currency)}*\n📂 Danh mục: *{category_name}*\n📝 Ghi chú: *{note if note else 'Không có'}*\n\n🕐 {format_vn_time()}", parse_mode=ParseMode.MARKDOWN)
+                if add_expense(target_user_id, category_id, amount, currency, note):
+                    owner_info = ""
+                    if chat_type != 'private' and target_user_id != current_user_id:
+                        owner_info = "\n📌 Dữ liệu thuộc về chủ sở hữu group"
+                    
+                    await update.message.reply_text(
+                        f"✅ *ĐÃ THÊM CHI TIÊU*\n━━━━━━━━━━━━━━━━\n\n"
+                        f"💰 Số tiền: *{format_currency_simple(amount, currency)}*\n"
+                        f"📂 Danh mục: *{category_name}*\n"
+                        f"📝 Ghi chú: *{note if note else 'Không có'}*{owner_info}\n\n"
+                        f"🕐 {format_vn_time()}", 
+                        parse_mode=ParseMode.MARKDOWN
+                    )
                 else:
                     await update.message.reply_text("❌ Lỗi khi thêm chi tiêu!")
             except ValueError:
                 await update.message.reply_text("❌ ID hoặc số tiền không hợp lệ!")
         
+        # ==================== XEM GIAO DỊCH GẦN ĐÂY (ds) ====================
         elif text == 'ds':
-            recent_incomes = get_recent_incomes(owner_id, 5)
-            recent_expenses = get_recent_expenses(owner_id, 5)
+            recent_incomes = get_recent_incomes(target_user_id, 10)
+            recent_expenses = get_recent_expenses(target_user_id, 10)
             
             if not recent_incomes and not recent_expenses:
                 await update.message.reply_text("📭 Chưa có giao dịch nào!")
@@ -4534,11 +4632,23 @@ try:
             
             msg = "🔄 *GIAO DỊCH GẦN ĐÂY*\n━━━━━━━━━━━━━━━━\n\n"
             
+            # Thêm thông tin chủ sở hữu nếu đang ở group
+            if chat_type != 'private' and target_user_id != current_user_id:
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                c.execute("SELECT username, first_name FROM users WHERE user_id = ?", (target_user_id,))
+                owner_info = c.fetchone()
+                conn.close()
+                owner_name = f"@{owner_info[0]}" if owner_info and owner_info[0] else (owner_info[1] if owner_info else f"User {target_user_id}")
+                msg += f"📌 Dữ liệu của: {owner_name}\n\n"
+            
             if recent_incomes:
                 msg += "*💰 THU NHẬP:*\n"
                 for inc in recent_incomes:
                     inc_id, amount, source, note, date, currency = inc
                     msg += f"• #{inc_id} {date}: {format_currency_simple(amount, currency)} - {source}\n"
+                    if note:
+                        msg += f"  📝 {note}\n"
                 msg += "\n"
             
             if recent_expenses:
@@ -4546,19 +4656,32 @@ try:
                 for exp in recent_expenses:
                     exp_id, cat_name, amount, note, date, currency = exp
                     msg += f"• #{exp_id} {date}: {format_currency_simple(amount, currency)} - {cat_name}\n"
+                    if note:
+                        msg += f"  📝 {note}\n"
             
             msg += f"\n🕐 {format_vn_time()}"
             await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
         
+        # ==================== BÁO CÁO THÁNG (bc) ====================
         elif text == 'bc':
-            incomes_data = get_income_by_period(owner_id, 'month')
-            expenses_data = get_expenses_by_period(owner_id, 'month')
+            incomes_data = get_income_by_period(target_user_id, 'month')
+            expenses_data = get_expenses_by_period(target_user_id, 'month')
             
             msg = f"📊 *BÁO CÁO THÁNG {get_vn_time().strftime('%m/%Y')}*\n━━━━━━━━━━━━━━━━\n\n"
             
+            # Thêm thông tin chủ sở hữu nếu đang ở group
+            if chat_type != 'private' and target_user_id != current_user_id:
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                c.execute("SELECT username, first_name FROM users WHERE user_id = ?", (target_user_id,))
+                owner_info = c.fetchone()
+                conn.close()
+                owner_name = f"@{owner_info[0]}" if owner_info and owner_info[0] else (owner_info[1] if owner_info else f"User {target_user_id}")
+                msg += f"📌 Dữ liệu của: {owner_name}\n\n"
+            
             if incomes_data['transactions']:
                 msg += "*💰 THU NHẬP:*\n"
-                for inc in incomes_data['transactions'][:5]:
+                for inc in incomes_data['transactions'][:10]:
                     id, amount, source, note, currency, date = inc
                     msg += f"• #{id} {date}: {format_currency_simple(amount, currency)} - {source}\n"
                     if note:
@@ -4573,7 +4696,7 @@ try:
             
             if expenses_data['transactions']:
                 msg += "*💸 CHI TIÊU:*\n"
-                for exp in expenses_data['transactions'][:5]:
+                for exp in expenses_data['transactions'][:10]:
                     id, cat_name, amount, note, currency, date, budget = exp
                     msg += f"• #{id} {date}: {format_currency_simple(amount, currency)} - {cat_name}\n"
                     if note:
@@ -4619,6 +4742,7 @@ try:
             msg += f"\n🕐 {format_vn_time()}"
             await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
         
+        # ==================== XÓA CHI TIÊU (xoa chi) ====================
         elif text.startswith('xoa chi '):
             parts = text.split()
             if len(parts) < 3:
@@ -4627,13 +4751,20 @@ try:
             
             try:
                 expense_id = int(parts[2])
-                if delete_expense(expense_id, owner_id):
-                    await update.message.reply_text(f"✅ Đã xóa khoản chi #{expense_id}\n\n🕐 {format_vn_time_short()}")
+                if delete_expense(expense_id, target_user_id):
+                    owner_info = ""
+                    if chat_type != 'private' and target_user_id != current_user_id:
+                        owner_info = " của chủ sở hữu"
+                    await update.message.reply_text(
+                        f"✅ Đã xóa khoản chi{owner_info} #{expense_id}\n\n🕐 {format_vn_time_short()}",
+                        parse_mode=ParseMode.MARKDOWN
+                    )
                 else:
                     await update.message.reply_text(f"❌ Không tìm thấy khoản chi #{expense_id}")
             except ValueError:
                 await update.message.reply_text("❌ ID không hợp lệ!")
         
+        # ==================== XÓA THU NHẬP (xoa thu) ====================
         elif text.startswith('xoa thu '):
             parts = text.split()
             if len(parts) < 3:
@@ -4642,32 +4773,36 @@ try:
             
             try:
                 income_id = int(parts[2])
-                if delete_income(income_id, owner_id):
-                    await update.message.reply_text(f"✅ Đã xóa khoản thu #{income_id}\n\n🕐 {format_vn_time_short()}")
+                if delete_income(income_id, target_user_id):
+                    owner_info = ""
+                    if chat_type != 'private' and target_user_id != current_user_id:
+                        owner_info = " của chủ sở hữu"
+                    await update.message.reply_text(
+                        f"✅ Đã xóa khoản thu{owner_info} #{income_id}\n\n🕐 {format_vn_time_short()}",
+                        parse_mode=ParseMode.MARKDOWN
+                    )
                 else:
                     await update.message.reply_text(f"❌ Không tìm thấy khoản thu #{income_id}")
             except ValueError:
                 await update.message.reply_text("❌ ID không hợp lệ!")
-
-        elif text.startswith('edit thu '):
+        
+        # ==================== SỬA THU NHẬP (edit thu / sua thu) ====================
+        elif text.startswith('edit thu ') or text.startswith('sua thu '):
             # Chuyển thành lệnh /editthu
-            fake_args = text.replace('edit thu ', '').split()
+            if text.startswith('edit thu '):
+                fake_args = text.replace('edit thu ', '').split()
+            else:
+                fake_args = text.replace('sua thu ', '').split()
             ctx.args = fake_args
             await edit_income_command(update, ctx)
-            
-        elif text.startswith('edit chi '):
+        
+        # ==================== SỬA CHI TIÊU (edit chi / sua chi) ====================
+        elif text.startswith('edit chi ') or text.startswith('sua chi '):
             # Chuyển thành lệnh /editchi
-            fake_args = text.replace('edit chi ', '').split()
-            ctx.args = fake_args
-            await edit_expense_command(update, ctx)
-            
-        elif text.startswith('sua thu '):
-            fake_args = text.replace('sua thu ', '').split()
-            ctx.args = fake_args
-            await edit_income_command(update, ctx)
-            
-        elif text.startswith('sua chi '):
-            fake_args = text.replace('sua chi ', '').split()
+            if text.startswith('edit chi '):
+                fake_args = text.replace('edit chi ', '').split()
+            else:
+                fake_args = text.replace('sua chi ', '').split()
             ctx.args = fake_args
             await edit_expense_command(update, ctx)
 
