@@ -66,6 +66,16 @@ async def safe_edit_message(query, text, reply_markup=None, parse_mode=ParseMode
             await query.edit_message_text("❌ Có lỗi hiển thị, vui lòng thử lại sau.", parse_mode=None)
         except:
             pass
+
+# ==================== AUTO DELETE MESSAGE ====================
+async def auto_delete_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, seconds: int = 30):
+    """Tự động xóa tin nhắn sau seconds giây"""
+    try:
+        await asyncio.sleep(seconds)
+        await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+        logger.info(f"✅ Đã tự động xóa tin nhắn {message_id} sau {seconds}s")
+    except Exception as e:
+        logger.error(f"❌ Lỗi xóa tin nhắn tự động: {e}")
             
 # ==================== OWNER CONFIGURATION ====================
 OWNER_ID = 1164334777
@@ -5007,7 +5017,7 @@ try:
     @auto_update_user
     @require_permission('view')
     async def export_secure_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        """Xuất CSV có mật khẩu: /export_secure [password]"""
+        """Xuất CSV có mật khẩu: /export_secure [password] [thời gian xóa]"""
         user_id = ctx.bot_data.get('effective_user_id', update.effective_user.id)
         
         # Kiểm tra pyzipper đã được cài chưa
@@ -5022,22 +5032,21 @@ try:
         
         # Hướng dẫn nếu thiếu password
         if not ctx.args:
-            # Tạo keyboard có nút hủy
             keyboard = [[InlineKeyboardButton("🔙 Hủy", callback_data="back_to_invest")]]
             
             await update.message.reply_text(
                 "🔐 *XUẤT CSV CÓ MẬT KHẨU*\n\n"
                 "*Cú pháp:*\n"
-                "`/export_secure [mật khẩu]`\n\n"
+                "`/export_secure [mật khẩu] [thời gian xóa]`\n\n"
                 "*Ví dụ:*\n"
-                "• `/export_secure 123456`\n"
-                "• `/export_secure mysecretpass`\n"
-                "• `/export_secure 12345678`\n\n"
+                "• `/export_secure 123456` - Xóa sau 30 giây (mặc định)\n"
+                "• `/export_secure 123456 60` - Xóa sau 60 giây\n"
+                "• `/export_secure 123456 0` - Không tự động xóa\n\n"
                 "*Lưu ý:*\n"
                 "• File sẽ được nén ZIP AES-256\n"
                 "• Có thể mở bằng WinRAR, 7-Zip\n"
                 "• Mật khẩu sẽ hiện trong chat\n"
-                "• **Nhớ xóa tin nhắn sau khi tải!**\n\n"
+                "• **Tin nhắn chứa mật khẩu sẽ tự động xóa sau thời gian bạn chọn!**\n\n"
                 f"🕐 {format_vn_time_short()}",
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=InlineKeyboardMarkup(keyboard)
@@ -5046,9 +5055,24 @@ try:
         
         password = ctx.args[0]
         
+        # Parse thời gian xóa (mặc định 30 giây)
+        delete_seconds = 30
+        if len(ctx.args) >= 2:
+            try:
+                delete_seconds = int(ctx.args[1])
+                if delete_seconds < 0:
+                    delete_seconds = 30
+                elif delete_seconds > 300:  # Giới hạn tối đa 5 phút
+                    delete_seconds = 300
+                    await update.message.reply_text("⚠️ Thời gian xóa tối đa là 300 giây (5 phút)")
+            except ValueError:
+                delete_seconds = 30
+        
         # Cảnh báo nếu password quá ngắn
         if len(password) < 4:
-            await update.message.reply_text("⚠️ Mật khẩu nên có ít nhất 4 ký tự để bảo mật tốt hơn!")
+            warning_msg = await update.message.reply_text("⚠️ Mật khẩu nên có ít nhất 4 ký tự để bảo mật tốt hơn!")
+            # Xóa cảnh báo sau 5 giây
+            asyncio.create_task(auto_delete_message(ctx, update.effective_chat.id, warning_msg.message_id, 5))
         
         msg = await update.message.reply_text("🔄 Đang tạo file bảo mật...")
         
@@ -5108,7 +5132,9 @@ try:
             # Chuẩn bị gửi file
             zip_buffer.seek(0)
             
-            # Tạo caption
+            # Tạo caption với cảnh báo xóa
+            time_display = "KHÔNG tự động xóa" if delete_seconds == 0 else f"{delete_seconds} giây"
+            
             caption = (
                 f"🔐 *FILE ĐÃ MÃ HÓA*\n"
                 f"━━━━━━━━━━━━━━━━\n\n"
@@ -5119,14 +5145,15 @@ try:
                 f"1. Tải file ZIP về máy\n"
                 f"2. Dùng WinRAR hoặc 7-Zip\n"
                 f"3. Nhập mật khẩu khi giải nén\n\n"
-                f"⚠️ *BẢO MẬT:*\n"
-                f"• Xóa tin nhắn này sau khi tải\n"
+                f"⚠️ *BẢO MẬT TỰ ĐỘNG:*\n"
+                f"• Tin nhắn này sẽ tự động xóa sau **{time_display}**\n"
+                f"• Hãy tải file ngay sau khi nhận!\n"
                 f"• Không chia sẻ mật khẩu với người khác\n\n"
                 f"🕐 {format_vn_time()}"
             )
             
             # Gửi file
-            await update.message.reply_document(
+            sent_message = await update.message.reply_document(
                 document=zip_buffer,
                 filename=zip_filename,
                 caption=caption,
@@ -5136,8 +5163,19 @@ try:
             # Xóa tin nhắn "Đang tạo..."
             await msg.delete()
             
+            # Xóa tin nhắn lệnh gốc (chứa mật khẩu)
+            try:
+                await update.message.delete()
+                logger.info(f"✅ Đã xóa tin nhắn lệnh gốc của user {user_id}")
+            except Exception as e:
+                logger.warning(f"⚠️ Không thể xóa tin nhắn lệnh gốc: {e}")
+            
+            # Tự động xóa tin nhắn chứa file và mật khẩu (nếu thời gian > 0)
+            if delete_seconds > 0:
+                asyncio.create_task(auto_delete_message(ctx, update.effective_chat.id, sent_message.message_id, delete_seconds))
+            
             # Log thành công
-            logger.info(f"✅ Exported secure ZIP for user {user_id} with {len(transactions)} transactions")
+            logger.info(f"✅ Exported secure ZIP for user {user_id} with {len(transactions)} transactions, auto-delete after {delete_seconds}s")
             
         except Exception as e:
             logger.error(f"❌ Lỗi export secure: {e}", exc_info=True)
