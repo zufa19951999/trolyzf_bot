@@ -1117,17 +1117,21 @@ try:
             current_user_id = update.effective_user.id
             chat_id = update.effective_chat.id
             
-            # XÓA DỮ LIỆU CŨ - QUAN TRỌNG
-            context.bot_data.clear()
+            # ===== QUAN TRỌNG: XÓA SẠCH DỮ LIỆU CŨ =====
+            # Xóa tất cả biến liên quan đến quyền trong context
+            keys_to_remove = ['effective_user_id', 'is_admin', 'is_owner', 'group_owner_id']
+            for key in keys_to_remove:
+                if key in context.bot_data:
+                    del context.bot_data[key]
             
-            # PRIVATE CHAT: LUÔN TỰ QUẢN LÝ
+            # PRIVATE CHAT: LUÔN TỰ QUẢN LÝ, KHÔNG BAO GIỜ LÀ ADMIN
             if chat_type == 'private':
                 context.bot_data['effective_user_id'] = current_user_id
                 context.bot_data['current_user_id'] = current_user_id
                 context.bot_data['chat_type'] = chat_type
-                context.bot_data['is_admin'] = False
+                context.bot_data['is_admin'] = False  # LUÔN FALSE
                 context.bot_data['is_owner'] = False
-                logger.info(f"💬 PRIVATE: user {current_user_id} tự quản lý")
+                logger.info(f"💬 PRIVATE CHAT: user {current_user_id} tự quản lý (KHÔNG phải admin)")
                 return await func(update, context, *args, **kwargs)
             
             # TRONG GROUP
@@ -1143,16 +1147,20 @@ try:
                     )
                     return
                 
+                # Lưu owner_id để dùng sau
+                context.bot_data['group_owner_id'] = owner_id
+                
                 # Kiểm tra quyền trong group
                 has_permission = check_permission(chat_id, current_user_id, 'view')
                 
                 if not has_permission:
+                    # User không có quyền: vẫn cho phép nhưng tự quản lý
                     context.bot_data['effective_user_id'] = current_user_id
                     context.bot_data['current_user_id'] = current_user_id
                     context.bot_data['chat_type'] = chat_type
                     context.bot_data['is_admin'] = False
                     context.bot_data['is_owner'] = (current_user_id == owner_id)
-                    logger.info(f"👤 GROUP: user {current_user_id} chưa có quyền")
+                    logger.info(f"👤 GROUP: user {current_user_id} chưa có quyền, tự quản lý")
                     return await func(update, context, *args, **kwargs)
                 
                 # Kiểm tra quyền admin
@@ -1167,11 +1175,11 @@ try:
                     context.bot_data['is_owner'] = (current_user_id == owner_id)
                     logger.info(f"👑 GROUP: admin {current_user_id} thao tác trên dữ liệu owner {owner_id}")
                 else:
-                    # User thường: tự quản lý
+                    # User thường có quyền view: tự quản lý
                     context.bot_data['effective_user_id'] = current_user_id
                     context.bot_data['is_admin'] = False
                     context.bot_data['is_owner'] = False
-                    logger.info(f"👤 GROUP: user {current_user_id} tự quản lý")
+                    logger.info(f"👤 GROUP: user {current_user_id} có quyền view, tự quản lý")
                 
                 context.bot_data['current_user_id'] = current_user_id
                 context.bot_data['chat_type'] = chat_type
@@ -4980,7 +4988,7 @@ try:
     async def handle_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
-    
+        
         # Log chi tiết
         logger.info("=" * 50)
         logger.info(f"🔔 CALLBACK NHẬN ĐƯỢC: {query.data}")
@@ -4995,36 +5003,39 @@ try:
         data = query.data
         
         try:
-            # Lấy owner_id (chủ sở hữu dữ liệu)
-            owner_id = ctx.bot_data.get('effective_user_id', query.from_user.id)
+            # Lấy thông tin cơ bản
             current_user_id = query.from_user.id
             chat_id = query.message.chat.id
-            
-            # Kiểm tra quyền admin
-            is_admin = check_permission(chat_id, current_user_id, 'edit') or \
-                       check_permission(chat_id, current_user_id, 'delete') or \
-                       check_permission(chat_id, current_user_id, 'manage')
-            
-            # Kiểm tra xem có phải chủ sở hữu không
-            is_owner_user = (current_user_id == owner_id)
-            
-            logger.info(f"👤 User: {current_user_id}, Owner: {owner_id}, IsAdmin: {is_admin}, IsOwner: {is_owner_user}")
-
-            # ===== THÊM KIỂM TRA CHAT TYPE =====
             chat_type = query.message.chat.type
             
-            # Xác định target_user_id dựa trên chat type
+            # ===== QUAN TRỌNG: XÁC ĐỊNH TARGET USER DỰA TRÊN CHAT TYPE =====
             if chat_type == 'private':
-                # Private chat: CHỈ xử lý dữ liệu của user hiện tại
+                # PRIVATE CHAT: LUÔN XỬ LÝ DỮ LIỆU CỦA CHÍNH USER
                 target_user_id = current_user_id
-                logger.info(f"💬 PRIVATE CALLBACK: Xử lý cho user {target_user_id} (cá nhân)")
+                is_admin = False
+                is_owner_user = False
+                owner_id = current_user_id  # Trong private, owner là chính mình
+                logger.info(f"💬 PRIVATE CALLBACK: xử lý cho user {target_user_id}")
             else:
-                # Group chat: Xử lý dữ liệu của owner (nếu có quyền)
-                if not is_owner_user and not is_admin:
-                    await safe_edit_message(query, "❌ Bạn không có quyền thực hiện thao tác này trong group!")
+                # GROUP CHAT: Lấy thông tin từ context
+                owner_id = ctx.bot_data.get('group_owner_id', get_group_owner(chat_id))
+                is_admin = ctx.bot_data.get('is_admin', False)
+                is_owner_user = (current_user_id == owner_id)
+                
+                # Kiểm tra quyền trong group
+                if not check_permission(chat_id, current_user_id, 'view'):
+                    await safe_edit_message(query, "❌ Bạn không có quyền sử dụng bot trong nhóm này!")
                     return
-                target_user_id = owner_id
-                logger.info(f"👥 GROUP CALLBACK: Xử lý cho owner {target_user_id}")
+                
+                # Xác định target_user_id
+                if is_admin or is_owner_user:
+                    target_user_id = owner_id
+                    logger.info(f"👥 GROUP CALLBACK: admin {current_user_id} xử lý dữ liệu owner {target_user_id}")
+                else:
+                    target_user_id = current_user_id
+                    logger.info(f"👥 GROUP CALLBACK: user {current_user_id} tự xử lý dữ liệu")
+            
+            logger.info(f"🎯 Target user: {target_user_id}, IsAdmin: {is_admin}, IsOwner: {is_owner_user}")
             
             # ===========================================
             # NHÓM 1: XỬ LÝ XÓA DANH MỤC (ƯU TIÊN CAO NHẤT)
