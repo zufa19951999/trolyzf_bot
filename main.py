@@ -1878,7 +1878,7 @@ try:
         
         return InlineKeyboardMarkup(keyboard)
 
-    def def get_expense_menu_keyboard():
+    def get_expense_menu_keyboard():
         keyboard = [
             [InlineKeyboardButton("💰 THU NHẬP", callback_data="expense_income_menu"),
              InlineKeyboardButton("💸 CHI TIÊU", callback_data="expense_expense_menu")],
