@@ -471,7 +471,7 @@ try:
         except Exception as e:
             logger.error(f"❌ Lỗi optimize DB: {e}")
 
-    # ==================== MEMORY MONITOR ====================
+    # ==================== BACKGROUND TASKS ====================
     def check_memory_usage():
         try:
             process = psutil.Process()
@@ -8073,6 +8073,7 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
             logger.error(f"❌ Health server error: {e}")
             time.sleep(10)
 
+    # ==================== SMART STARTUP ====================
     def smart_startup():
         logger.info("🚀 SMART STARTUP")
         logger.info(f"📊 Render mode: {render_config.is_render}")
