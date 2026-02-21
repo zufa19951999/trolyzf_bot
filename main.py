@@ -5228,6 +5228,44 @@ try:
             # NHÓM 8: XỬ LÝ SỬA GIAO DỊCH
             # ===========================================
             
+            if data.startswith("edit_form_"):
+                logger.info(f"📝 Form sửa giao dịch: {data}")
+                tx_id_str = data.replace("edit_form_", "")
+                
+                if not tx_id_str.isdigit():
+                    await safe_edit_message(query, "❌ ID không hợp lệ!")
+                    return
+                
+                tx_id = int(tx_id_str)
+                
+                # Lấy thông tin giao dịch
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                c.execute('''SELECT symbol, amount, buy_price FROM portfolio WHERE id = ?''', (tx_id,))
+                tx = c.fetchone()
+                conn.close()
+                
+                if not tx:
+                    await safe_edit_message(query, f"❌ Không tìm thấy giao dịch #{tx_id}")
+                    return
+                
+                symbol, current_amount, current_price = tx
+                
+                msg = (f"✏️ *SỬA GIAO DỊCH #{tx_id}*\n━━━━━━━━━━━━━━━━\n\n"
+                       f"*{symbol}*\n"
+                       f"📊 SL hiện tại: `{current_amount:.4f}`\n"
+                       f"💰 Giá hiện tại: `{fmt_price(current_price)}`\n\n"
+                       f"*Nhập lệnh:*\n"
+                       f"`/edit {tx_id} [số lượng mới] [giá mới]`\n\n"
+                       f"*Ví dụ:*\n"
+                       f"`/edit {tx_id} 0.5 45000`\n\n"
+                       f"🕐 {format_vn_time_short()}")
+                
+                keyboard = [[InlineKeyboardButton("🔙 Quay lại", callback_data=f"edit_{tx_id}")]]
+                
+                await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                return
+                
             if data.startswith("edit_"):
                 logger.info(f"✏️ Sửa giao dịch: {data}")
                 
@@ -5293,45 +5331,7 @@ try:
                 
                 await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
                 return
-            
-            if data.startswith("edit_form_"):
-                logger.info(f"📝 Form sửa giao dịch: {data}")
-                tx_id_str = data.replace("edit_form_", "")
-                
-                if not tx_id_str.isdigit():
-                    await safe_edit_message(query, "❌ ID không hợp lệ!")
-                    return
-                
-                tx_id = int(tx_id_str)
-                
-                # Lấy thông tin giao dịch
-                conn = sqlite3.connect(DB_PATH)
-                c = conn.cursor()
-                c.execute('''SELECT symbol, amount, buy_price FROM portfolio WHERE id = ?''', (tx_id,))
-                tx = c.fetchone()
-                conn.close()
-                
-                if not tx:
-                    await safe_edit_message(query, f"❌ Không tìm thấy giao dịch #{tx_id}")
-                    return
-                
-                symbol, current_amount, current_price = tx
-                
-                msg = (f"✏️ *SỬA GIAO DỊCH #{tx_id}*\n━━━━━━━━━━━━━━━━\n\n"
-                       f"*{symbol}*\n"
-                       f"📊 SL hiện tại: `{current_amount:.4f}`\n"
-                       f"💰 Giá hiện tại: `{fmt_price(current_price)}`\n\n"
-                       f"*Nhập lệnh:*\n"
-                       f"`/edit {tx_id} [số lượng mới] [giá mới]`\n\n"
-                       f"*Ví dụ:*\n"
-                       f"`/edit {tx_id} 0.5 45000`\n\n"
-                       f"🕐 {format_vn_time_short()}")
-                
-                keyboard = [[InlineKeyboardButton("🔙 Quay lại", callback_data=f"edit_{tx_id}")]]
-                
-                await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
-                return
-            
+   
             if data.startswith("del_"):
                 logger.info(f"🗑 Xóa giao dịch: {data}")
                 tx_id_str = data.replace("del_", "")
