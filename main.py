@@ -8015,34 +8015,43 @@ try:
                     keyboard = []
                     row = []
                     
+                    human_count = 0
+                    bot_count = 0
+                    
                     for admin in admins:
                         user = admin.user
-                        if user.is_bot:
-                            continue
-                            
-                        # Lấy quyền hiện tại từ DB
-                        conn = sqlite3.connect(DB_PATH)
-                        c = conn.cursor()
-                        c.execute('''SELECT can_view_all, can_edit_all, can_delete_all, can_manage_perms 
-                                    FROM permissions WHERE group_id = ? AND user_id = ?''', (chat_id, user.id))
-                        perm = c.fetchone()
-                        conn.close()
+                        
+                        # Lấy quyền hiện tại từ DB (nếu là người)
+                        perm = None
+                        if not user.is_bot:
+                            conn = sqlite3.connect(DB_PATH)
+                            c = conn.cursor()
+                            c.execute('''SELECT can_view_all, can_edit_all, can_delete_all, can_manage_perms 
+                                        FROM permissions WHERE group_id = ? AND user_id = ?''', (chat_id, user.id))
+                            perm = c.fetchone()
+                            conn.close()
                         
                         # Xác định icon và tên hiển thị
-                        if admin.status == 'creator':
-                            icon = "👑"
+                        if user.is_bot:
+                            icon = "🤖"  # Bot
+                            bot_count += 1
+                        elif admin.status == 'creator':
+                            icon = "👑"  # Chủ sở hữu
+                            human_count += 1
                         elif perm:
-                            icon = "🔰" 
+                            icon = "🔰"  # Đã được cấp quyền
+                            human_count += 1
                         else:
-                            icon = "👤"
+                            icon = "👤"  # Thành viên thường
+                            human_count += 1
                         
-                        display_name = f"@{user.username}" if user.username else user.first_name
+                        display_name = f"@{user.username}" if user.username else user.first_name or "No name"
                         msg_lines.append(f"{icon} {display_name} (`{user.id}`)")
                         
-                        # Chỉ thêm nút quản lý nếu user hiện tại có quyền manage
-                        if check_permission(chat_id, query.from_user.id, 'manage'):
-                            btn_text = f"⚙️ {user.first_name[:10]}"
-                            if len(user.first_name) > 10:
+                        # Chỉ thêm nút quản lý nếu KHÔNG phải bot và user hiện tại có quyền manage
+                        if not user.is_bot and check_permission(chat_id, query.from_user.id, 'manage'):
+                            btn_text = f"⚙️ {user.first_name[:10] if user.first_name else 'User'}"
+                            if user.first_name and len(user.first_name) > 10:
                                 btn_text = f"⚙️ {user.first_name[:8]}..."
                             
                             row.append(InlineKeyboardButton(btn_text, callback_data=f"perm_user_{user.id}"))
@@ -8054,6 +8063,12 @@ try:
                     # Thêm hàng cuối cùng nếu còn
                     if row:
                         keyboard.append(row)
+                    
+                    # Thêm thống kê
+                    msg_lines.append("")
+                    msg_lines.append(f"📊 *Tổng số:* {len(admins)} thành viên")
+                    msg_lines.append(f"   • 👤 Người: {human_count}")
+                    msg_lines.append(f"   • 🤖 Bot: {bot_count}")
                     
                     # Nút quay lại
                     keyboard.append([InlineKeyboardButton("🔙 Về cài đặt", callback_data="back_to_settings")])
