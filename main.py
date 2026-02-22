@@ -8005,17 +8005,27 @@ try:
             
             elif data == "settings_members":
                 await query.edit_message_text("🔄 Đang lấy danh sách thành viên...")
+                
                 try:
+                    # Lấy danh sách admin từ Telegram
+                    logger.info("📋 Bắt đầu lấy danh sách admin từ Telegram...")
                     admins = await ctx.bot.get_chat_administrators(chat_id)
+                    logger.info(f"✅ Lấy được {len(admins)} admin từ Telegram")
+                    
                     msg = "👥 *DANH SÁCH THÀNH VIÊN*\n━━━━━━━━━━━━━━━━\n\n"
                     keyboard = []
                     row = []
+                    member_count = 0
                     
                     for admin in admins:
                         user = admin.user
                         if user.is_bot:
                             continue
-                            
+                        
+                        member_count += 1
+                        logger.info(f"   • Đang xử lý user {user.id}: {user.first_name}")
+                        
+                        # Lấy thông tin quyền hiện tại
                         conn = sqlite3.connect(DB_PATH)
                         c = conn.cursor()
                         c.execute('''SELECT can_view_all, can_edit_all, can_delete_all, can_manage_perms 
@@ -8023,16 +8033,18 @@ try:
                         perm = c.fetchone()
                         conn.close()
                         
+                        # Xác định icon
                         if admin.status == 'creator':
-                            status = "👑"
+                            status = "👑"  # Chủ sở hữu
                         elif perm:
-                            status = "🔰"
+                            status = "🔰"  # Đã được cấp quyền
                         else:
-                            status = "👤"
+                            status = "👤"  # Thành viên thường
                         
                         name = f"@{user.username}" if user.username else user.first_name
                         msg += f"{status} {name} (`{user.id}`)\n"
                         
+                        # Thêm nút để quản lý từng người
                         if admin.status == 'creator' or perm or check_permission(chat_id, query.from_user.id, 'manage'):
                             btn_text = f"⚙️ {user.first_name[:10]}"
                             if len(user.first_name) > 10:
@@ -8043,14 +8055,21 @@ try:
                             keyboard.append(row)
                             row = []
                     
+                    logger.info(f"✅ Đã xử lý {member_count} thành viên")
+                    
                     if row:
                         keyboard.append(row)
                     
                     keyboard.append([InlineKeyboardButton("🔙 Về cài đặt", callback_data="back_to_settings")])
+                    
+                    logger.info("📤 Đang gửi message...")
                     await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                    logger.info("✅ Đã gửi message thành công")
+                    return
+                    
                 except Exception as e:
-                    logger.error(f"❌ Lỗi settings_members: {e}")
-                    await safe_edit_message(query, "❌ Lỗi lấy danh sách thành viên!")
+                    logger.error(f"❌ Lỗi settings_members: {e}", exc_info=True)
+                    await safe_edit_message(query, f"❌ Lỗi: {str(e)[:100]}")
                     return
             
             elif data == "settings_permissions":
