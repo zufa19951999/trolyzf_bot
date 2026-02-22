@@ -3011,35 +3011,35 @@ try:
         await update.message.reply_text(help_msg, parse_mode=ParseMode.MARKDOWN)
 
     @auto_update_user
-async def lang_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Chọn ngôn ngữ: /lang [vi/zh]"""
-    user_id = update.effective_user.id
-    
-    if not ctx.args:
-        # Hiển thị menu chọn ngôn ngữ
-        keyboard = [
-            [InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="lang_vi")],
-            [InlineKeyboardButton("🇨🇳 中文", callback_data="lang_zh")],
-        ]
+    async def lang_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Chọn ngôn ngữ: /lang [vi/zh]"""
+        user_id = update.effective_user.id
         
-        current = "Tiếng Việt" if get_lang(user_id) == 'VI' else "中文"
-        msg = (f"🌐 *CHỌN NGÔN NGỮ*\n━━━━━━━━━━━━━━━━\n\n"
-               f"Hiện tại: {current}\n\n"
-               f"Vui lòng chọn ngôn ngữ:")
+        if not ctx.args:
+            # Hiển thị menu chọn ngôn ngữ
+            keyboard = [
+                [InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="lang_vi")],
+                [InlineKeyboardButton("🇨🇳 中文", callback_data="lang_zh")],
+            ]
+            
+            current = "Tiếng Việt" if get_lang(user_id) == 'VI' else "中文"
+            msg = (f"🌐 *CHỌN NGÔN NGỮ*\n━━━━━━━━━━━━━━━━\n\n"
+                   f"Hiện tại: {current}\n\n"
+                   f"Vui lòng chọn ngôn ngữ:")
+            
+            await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, 
+                                           reply_markup=InlineKeyboardMarkup(keyboard))
+            return
         
-        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, 
-                                       reply_markup=InlineKeyboardMarkup(keyboard))
-        return
-    
-    lang = ctx.args[0].lower()
-    if lang in ['vi', 'vietnamese']:
-        LANGUAGE[user_id] = 'VI'
-        await update.message.reply_text("✅ Đã chuyển sang Tiếng Việt!")
-    elif lang in ['zh', 'chinese', 'cn']:
-        LANGUAGE[user_id] = 'ZH'
-        await update.message.reply_text("✅ 已切换到中文！")
-    else:
-        await update.message.reply_text("❌ Ngôn ngữ không hỗ trợ! /lang vi hoặc /lang zh")
+        lang = ctx.args[0].lower()
+        if lang in ['vi', 'vietnamese']:
+            LANGUAGE[user_id] = 'VI'
+            await update.message.reply_text("✅ Đã chuyển sang Tiếng Việt!")
+        elif lang in ['zh', 'chinese', 'cn']:
+            LANGUAGE[user_id] = 'ZH'
+            await update.message.reply_text("✅ 已切换到中文！")
+        else:
+            await update.message.reply_text("❌ Ngôn ngữ không hỗ trợ! /lang vi hoặc /lang zh")
     @auto_update_user
     @require_permission('view')
     async def usdt_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
