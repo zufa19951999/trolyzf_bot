@@ -8051,6 +8051,7 @@ try:
                 except Exception as e:
                     logger.error(f"❌ Lỗi settings_members: {e}")
                     await safe_edit_message(query, "❌ Lỗi lấy danh sách thành viên!")
+                    return
             
             elif data == "settings_permissions":
                 msg = ("🔐 *PHÂN QUYỀN CHI TIẾT*\n"
@@ -8084,6 +8085,7 @@ try:
                     [InlineKeyboardButton("🔙 Về cài đặt", callback_data="back_to_settings")]
                 ]
                 await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                return
             
             elif data == "settings_list":
                 conn = sqlite3.connect(DB_PATH)
@@ -8116,6 +8118,7 @@ try:
                 
                 keyboard = [[InlineKeyboardButton("🔙 Về cài đặt", callback_data="back_to_settings")]]
                 await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                return
             
             elif data == "settings_sync":
                 await query.edit_message_text("🔄 Đang đồng bộ danh sách admin...")
@@ -8166,6 +8169,7 @@ try:
                 
                 keyboard = [[InlineKeyboardButton("🔙 Về cài đặt", callback_data="back_to_settings")]]
                 await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                return
             
             elif data == "back_to_settings":
                 keyboard = [
@@ -8180,6 +8184,7 @@ try:
                        f"Chọn chức năng quản lý:\n\n"
                        f"🕐 {format_vn_time()}")
                 await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                return
             
             elif data.startswith("perm_user_"):
                 target_id = int(data.replace("perm_user_", ""))
@@ -8208,6 +8213,7 @@ try:
                 key = f"temp_perm_{target_id}"
                 ctx.bot_data[key] = (view, edit, delete, manage)
                 await update_perm_message(query, ctx, target_id, view, edit, delete, manage)
+                return
             
             elif data.startswith("perm_toggle_"):
                 parts = data.split("_")
@@ -8242,6 +8248,7 @@ try:
                 
                 ctx.bot_data[key] = (view, edit, delete, manage)
                 await update_perm_message(query, ctx, target_id, view, edit, delete, manage)
+                return
             
             elif data.startswith("perm_set_"):
                 parts = data.split("_")
@@ -8256,6 +8263,7 @@ try:
                 key = f"temp_perm_{target_id}"
                 ctx.bot_data[key] = (view, edit, delete, manage)
                 await update_perm_message(query, ctx, target_id, view, edit, delete, manage)
+                return
             
             elif data.startswith("perm_save_"):
                 target_id = int(data.replace("perm_save_", ""))
@@ -8306,6 +8314,7 @@ try:
                         await safe_edit_message(query, "❌ Lỗi khi lưu quyền!")
                 else:
                     await safe_edit_message(query, "ℹ️ Không có thay đổi quyền nào!")
+                    return
         
             # ===========================================
             # XỬ LÝ CALLBACK KHÔNG XÁC ĐỊNH
