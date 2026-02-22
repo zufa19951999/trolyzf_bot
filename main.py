@@ -409,21 +409,36 @@ def require_permission(permission_type):
             
             # TRONG GROUP: Kiểm tra quyền
             if chat_type in ['group', 'supergroup']:
-                # ===== QUAN TRỌNG: LỆNH /s KHÔNG CẦN QUYỀN =====
-                # Kiểm tra tên hàm hoặc lệnh đang gọi
+                # ===== CHỈ LỆNH /s ĐƯỢC PUBLIC =====
                 func_name = func.__name__
                 
-                # Nếu là lệnh s_command (xem giá) - cho phép KHÔNG CẦN QUYỀN
+                # LỆNH /s (s_command) - PUBLIC, KHÔNG CẦN QUYỀN
                 if func_name == 's_command':
                     return await func(update, context, *args, **kwargs)
                 # ===== KẾT THÚC =====
                 
-                # Các lệnh khác - vẫn kiểm tra quyền bình thường
+                # Các lệnh khác - kiểm tra quyền như cũ
                 if not check_permission(chat_id, user_id, permission_type):
+                    # Thông báo chi tiết hơn
+                    command_map = {
+                        'buy_command': 'mua coin',
+                        'sell_command': 'bán coin',
+                        'edit_command': 'sửa giao dịch',
+                        'delete_tx_command': 'xóa giao dịch',
+                        'alert_command': 'tạo cảnh báo',
+                        'alerts_command': 'xem cảnh báo',
+                        'stats_command': 'xem thống kê',
+                        'usdt_command': 'xem tỷ giá USDT',
+                        'export_master_command': 'xuất dữ liệu'
+                    }
+                    
+                    cmd_name = command_map.get(func_name, 'này')
+                    
                     await update.message.reply_text(
-                        "❌ *KHÔNG CÓ QUYỀN SỬ DỤNG*\n\n"
-                        "Bạn không có quyền thực hiện hành động này trong nhóm.\n"
-                        "Vui lòng liên hệ chủ sở hữu nhóm để được cấp quyền.\n\n"
+                        f"❌ *KHÔNG CÓ QUYỀN*\n━━━━━━━━━━━━━━━━\n\n"
+                        f"Bạn không có quyền sử dụng lệnh {cmd_name} trong nhóm.\n\n"
+                        f"💡 *Lệnh public duy nhất:* `/s btc` (xem giá coin)\n\n"
+                        f"👑 Liên hệ chủ nhóm để được cấp quyền.\n\n"
                         f"🕐 {format_vn_time()}", 
                         parse_mode=ParseMode.MARKDOWN
                     )
