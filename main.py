@@ -7181,101 +7181,92 @@ def smart_startup():
 
 # ==================== PHẦN 26: MAIN ====================
 if __name__ == '__main__':
-    try:
-        logger.info("🚀 KHỞI ĐỘNG CRYPTO BOT - RENDER OPTIMIZED")
-        logger.info(f"🕐 Thời gian: {format_vn_time()}")
-        
-        load_dotenv()
+        try:
+            logger.info("🚀 KHỞI ĐỘNG CRYPTO BOT - RENDER OPTIMIZED")
+            logger.info(f"🕐 Thời gian: {format_vn_time()}")
+            
+            # Tạo application
+            app = Application.builder().token(TELEGRAM_TOKEN).build()
+            app.bot_data = {}
+            logger.info("✅ Đã tạo Telegram Application")
 
-        TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
-        CMC_API_KEY = os.getenv('CMC_API_KEY')
-        CMC_API_URL = "https://pro-api.coinmarketcap.com/v1"
-
-        if not TELEGRAM_TOKEN:
-            logger.error("❌ THIẾU TELEGRAM_TOKEN")
-            raise ValueError("TELEGRAM_TOKEN không được để trống")
-        
-        if not CMC_API_KEY:
-            logger.warning("⚠️ THIẾU CMC_API_KEY")
-
-        app = Application.builder().token(TELEGRAM_TOKEN).build()
-        app.bot_data = {}
-        logger.info("✅ Đã tạo Telegram Application")
-
-        webhook_app = Flask(__name__)
-
-        # Register all handlers
-        app.add_handler(CommandHandler("start", start))
-        app.add_handler(CommandHandler("help", help_command))
-        app.add_handler(CommandHandler("menu", menu_command))
-        app.add_handler(CommandHandler("usdt", usdt_command))
-        app.add_handler(CommandHandler("s", s_command))
-        app.add_handler(CommandHandler("buy", buy_command))
-        app.add_handler(CommandHandler("sell", sell_command))
-        app.add_handler(CommandHandler("edit", edit_command))
-        app.add_handler(CommandHandler("del", delete_tx_command))
-        app.add_handler(CommandHandler("delete", delete_tx_command))
-        app.add_handler(CommandHandler("xoa", delete_tx_command))
-        app.add_handler(CommandHandler("alert", alert_command))
-        app.add_handler(CommandHandler("alerts", alerts_command))
-        app.add_handler(CommandHandler("stats", stats_command))
-        app.add_handler(CommandHandler("perm", perm_command))
-        app.add_handler(CommandHandler("whoami", whoami_command))
-        app.add_handler(CommandHandler("permgrant", quick_grant_command))
-        app.add_handler(CommandHandler("getid", getid_command))
-        app.add_handler(CommandHandler("syncusers", sync_users_command))
-        app.add_handler(CommandHandler("view", view_portfolio_command))
-        app.add_handler(CommandHandler("users", list_users_command))
-        app.add_handler(CommandHandler("syncadmins", sync_admins_command))
-        app.add_handler(CommandHandler("checkperm", check_perm_command))
-        app.add_handler(CommandHandler("syncdata", sync_data_command))
-        app.add_handler(CommandHandler("owner", owner_panel))
-        app.add_handler(CommandHandler("debugperm", debug_perm_command))
-        app.add_handler(CommandHandler("setupgroup", setup_group_command))
-        app.add_handler(CommandHandler("groupinfo", group_info_command))
-        app.add_handler(CommandHandler("addadmin", add_group_admin))
-        app.add_handler(CommandHandler("hide", hide_keyboard))
-        app.add_handler(CommandHandler("balance", balance_command))
-        app.add_handler(CommandHandler("canhdoi", balance_command))
-        app.add_handler(CommandHandler("thuchi", balance_command))
-        app.add_handler(CommandHandler("addadmin", add_admin_command))
-        app.add_handler(CommandHandler("listadmin", list_admin_command))
-        app.add_handler(CommandHandler("removeadmin", remove_admin_command))
-        app.add_handler(CommandHandler("xoadm", delete_category_command))
-        app.add_handler(CommandHandler("xoacategory", delete_category_command))
-        app.add_handler(CommandHandler("xoadanhmuc", delete_category_command))
-        app.add_handler(CommandHandler("delcat", delete_category_command))
-        app.add_handler(CommandHandler("editthu", edit_income_command))
-        app.add_handler(CommandHandler("editchi", edit_expense_command))
-        app.add_handler(CommandHandler("suathu", edit_income_command))
-        app.add_handler(CommandHandler("suachi", edit_expense_command))
-        app.add_handler(CommandHandler("grant", grant_command))
-        app.add_handler(CommandHandler("myperm", myperm_command))
-        app.add_handler(CommandHandler("export", export_master_command))
-        app.add_handler(CommandHandler("lang", lang_command))
-        app.add_handler(CommandHandler("export_secure", export_secure_command))
-        app.add_handler(CommandHandler("export_expense", export_expense_command))
-        app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_chat_members))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-        app.add_handler(CallbackQueryHandler(handle_callback))
-        
-        logger.info("✅ Đã đăng ký handlers")
-        
-        smart_startup()
-        
-        if render_config.is_render and render_config.render_url:
-            logger.info("⏳ Bot running in webhook mode...")
-            while True:
-                time.sleep(60)
-                check_memory_usage()
-        else:
-            logger.info("⏳ Bot running in polling mode...")
-            app.run_polling(timeout=30, drop_pending_updates=True)
-        
-    except Exception as e:
-        logger.error(f"❌ LỖI: {e}", exc_info=True)
-        time.sleep(5)
-        os.execv(sys.executable, ['python'] + sys.argv)
+            # Đăng ký handlers
+            app.add_handler(CommandHandler("start", start))
+            app.add_handler(CommandHandler("help", help_command))
+            app.add_handler(CommandHandler("menu", menu_command))
+            app.add_handler(CommandHandler("usdt", usdt_command))
+            app.add_handler(CommandHandler("s", s_command))
+            app.add_handler(CommandHandler("buy", buy_command))
+            app.add_handler(CommandHandler("sell", sell_command))
+            app.add_handler(CommandHandler("edit", edit_command))
+            app.add_handler(CommandHandler("del", delete_tx_command))
+            app.add_handler(CommandHandler("delete", delete_tx_command))
+            app.add_handler(CommandHandler("xoa", delete_tx_command))
+            app.add_handler(CommandHandler("alert", alert_command))
+            app.add_handler(CommandHandler("alerts", alerts_command))
+            app.add_handler(CommandHandler("stats", stats_command))
+            app.add_handler(CommandHandler("perm", perm_command))
+            app.add_handler(CommandHandler("whoami", whoami_command))
+            app.add_handler(CommandHandler("permgrant", quick_grant_command))
+            app.add_handler(CommandHandler("getid", getid_command))
+            app.add_handler(CommandHandler("syncusers", sync_users_command))
+            app.add_handler(CommandHandler("view", view_portfolio_command))
+            app.add_handler(CommandHandler("users", list_users_command))
+            app.add_handler(CommandHandler("syncadmins", sync_admins_command))
+            app.add_handler(CommandHandler("checkperm", check_perm_command))
+            app.add_handler(CommandHandler("syncdata", sync_data_command))
+            app.add_handler(CommandHandler("owner", owner_panel))
+            app.add_handler(CommandHandler("debugperm", debug_perm_command))
+            app.add_handler(CommandHandler("setupgroup", setup_group_command))
+            app.add_handler(CommandHandler("groupinfo", group_info_command))
+            app.add_handler(CommandHandler("addadmin", add_group_admin))
+            app.add_handler(CommandHandler("hide", hide_keyboard))
+            app.add_handler(CommandHandler("balance", balance_command))
+            app.add_handler(CommandHandler("canhdoi", balance_command))
+            app.add_handler(CommandHandler("thuchi", balance_command))
+            app.add_handler(CommandHandler("addadmin", add_admin_command))
+            app.add_handler(CommandHandler("listadmin", list_admin_command))
+            app.add_handler(CommandHandler("removeadmin", remove_admin_command))
+            app.add_handler(CommandHandler("xoadm", delete_category_command))
+            app.add_handler(CommandHandler("xoacategory", delete_category_command))
+            app.add_handler(CommandHandler("xoadanhmuc", delete_category_command))
+            app.add_handler(CommandHandler("xoadanhmuc", delete_category_command))
+            app.add_handler(CommandHandler("delcat", delete_category_command))
+            app.add_handler(CommandHandler("editthu", edit_income_command))
+            app.add_handler(CommandHandler("editchi", edit_expense_command))
+            app.add_handler(CommandHandler("suathu", edit_income_command))
+            app.add_handler(CommandHandler("suachi", edit_expense_command))
+            app.add_handler(CommandHandler("grant", grant_command))
+            app.add_handler(CommandHandler("myperm", myperm_command))
+            app.add_handler(CommandHandler("export", export_master_command))
+            app.add_handler(CommandHandler("lang", lang_command))
+            app.add_handler(CommandHandler("export_secure", export_secure_command))
+            app.add_handler(CommandHandler("export_expense", export_expense_command))
+            app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_chat_members))
+            app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+            app.add_handler(CallbackQueryHandler(handle_callback))
+            
+            logger.info("✅ Đã đăng ký handlers")
+            
+            # Khởi động thông minh
+            smart_startup()
+            
+            # Chạy bot
+            if render_config.is_render and render_config.render_url:
+                # Webhook mode: Flask đã chạy, cần giữ main thread alive
+                logger.info("⏳ Bot running in webhook mode...")
+                while True:
+                    time.sleep(60)
+                    check_memory_usage()
+            else:
+                # Polling mode
+                logger.info("⏳ Bot running in polling mode...")
+                app.run_polling(timeout=30, drop_pending_updates=True)
+            
+        except Exception as e:
+            logger.error(f"❌ LỖI: {e}", exc_info=True)
+            time.sleep(5)
+            os.execv(sys.executable, ['python'] + sys.argv)
 
 except Exception as e:
     logger.critical(f"💥 LỖI NGHIÊM TRỌNG: {e}", exc_info=True)
