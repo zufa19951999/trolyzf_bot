@@ -8000,10 +8000,10 @@ try:
                 return
 
             # ===========================================
-            # MENU CÀI ĐẶT - QUẢN LÝ PHÂN QUYỀN
+            # NHÓM 11: MENU CÀI ĐẶT - QUẢN LÝ PHÂN QUYỀN
             # ===========================================
             
-            if data == "settings_members":
+            elif data == "settings_members":
                 # Hiển thị danh sách thành viên để chọn
                 await query.edit_message_text("🔄 Đang lấy danh sách thành viên...")
                 
