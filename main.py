@@ -6934,7 +6934,7 @@ try:
                 try:
                     category_id = int(cat_id)
                 except ValueError:
-                    await (query, "❌ ID danh mục không hợp lệ!")
+                    await safe_edit_message(query, "❌ ID danh mục không hợp lệ!")
                     return
                 
                 await query.edit_message_text("🔄 Đang xóa danh mục...", parse_mode=None)
@@ -6977,7 +6977,7 @@ try:
                 try:
                     category_id = int(cat_id)
                 except ValueError:
-                    await (query, "❌ ID danh mục không hợp lệ!")
+                    await safe_edit_message(query, "❌ ID danh mục không hợp lệ!")
                     return
                 
                 categories = get_expense_categories(owner_id)
