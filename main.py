@@ -8412,7 +8412,7 @@ try:
                 await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
                 return
 
-                        elif data.startswith("lang_"):
+            elif data.startswith("lang_"):
                 lang = data.replace("lang_", "")
                 user_id = query.from_user.id
                 
