@@ -750,6 +750,9 @@ try:
                 logger.info(f"   • #{tx[0]}: {tx[1]} {tx[2]} @ {tx[3]}")
                 
             return transactions
+        except sqlite3.Error as e:  # <-- THÊM DÒNG NÀY
+            logger.error(f"❌ Lỗi SQL lấy transaction: {e}")
+            return []
         except Exception as e:
             logger.error(f"❌ Lỗi lấy transaction: {e}")
             return []
@@ -2693,14 +2696,36 @@ try:
             await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
     async def resolve_user_id(target, ctx):
+        """Giải quyết user ID từ username hoặc ID, với fallback từ Telegram API"""
         if target.startswith('@'):
             username = target[1:]
-            return get_user_id_by_username(username)
+            user_id = get_user_id_by_username(username)
+            
+            if not user_id:
+                # Thử lấy từ Telegram API
+                try:
+                    # Thử lấy chat từ username
+                    chat = await ctx.bot.get_chat(username)
+                    if chat:
+                        user_id = chat.id
+                        # Lưu vào database
+                        await update_user_info_async(chat)
+                        logger.info(f"✅ Lấy user {user_id} từ Telegram API cho @{username}")
+                except Exception as e:
+                    logger.error(f"❌ Lỗi get_chat từ Telegram: {e}")
+                    
+                    # Thử lấy bằng cách khác: gửi tin nhắn tạm? (không khả thi)
+                    # Thông báo lỗi
+                    pass
+            
+            return user_id
         else:
             try:
+                # Thử parse thành số
                 return int(target)
-            except:
-                if ctx.message.reply_to_message:
+            except ValueError:
+                # Nếu không phải số, thử lấy từ reply
+                if ctx.message and ctx.message.reply_to_message:
                     return ctx.message.reply_to_message.from_user.id
         return None
 
@@ -5313,14 +5338,18 @@ try:
                 conn.close()
 
     def grant_admin_permission(group_id, admin_id, granted_by, permissions):
+        """Cấp quyền admin trong group - ĐỒNG BỘ cả 2 bảng"""
         try:
             conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
             created_at = get_vn_time().strftime("%Y-%m-%d %H:%M:%S")
             
+            # ===== BẢNG CŨ: group_admins (giữ để tương thích) =====
             c.execute("DELETE FROM group_admins WHERE group_id = ? AND admin_id = ?", (group_id, admin_id))
             
-            c.execute('''INSERT INTO group_admins (group_id, admin_id, granted_by, can_view, can_edit, can_delete, can_manage, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+            c.execute('''INSERT INTO group_admins 
+                        (group_id, admin_id, granted_by, can_view, can_edit, can_delete, can_manage, created_at) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
                       (group_id, admin_id, granted_by,
                        permissions.get('view', 0),
                        permissions.get('edit', 0),
@@ -5328,14 +5357,42 @@ try:
                        permissions.get('manage', 0),
                        created_at))
             
+            # ===== BẢNG MỚI: permissions (quan trọng) =====
+            # Xóa dữ liệu cũ trong bảng permissions
+            c.execute("DELETE FROM permissions WHERE group_id = ? AND user_id = ?", (group_id, admin_id))
+            
+            # Xác định role dựa trên quyền
+            role = 'staff'
+            if permissions.get('manage', 0) == 1:
+                role = 'staff'  # manage là quyền cao nhất cho staff
+            
+            # Thêm vào bảng permissions
+            c.execute('''INSERT INTO permissions 
+                        (group_id, user_id, granted_by, is_approved, role, 
+                         can_view_all, can_edit_all, can_delete_all, can_manage_perms, 
+                         created_at, approved_at) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                      (group_id, admin_id, granted_by, 1, role,
+                       permissions.get('view', 0),
+                       permissions.get('edit', 0),
+                       permissions.get('delete', 0),
+                       permissions.get('manage', 0),
+                       created_at, created_at))
+            
             conn.commit()
             conn.close()
+            
             logger.info(f"✅ Granted admin permissions to {admin_id} in group {group_id}")
+            logger.info(f"   • View: {permissions.get('view', 0)}")
+            logger.info(f"   • Edit: {permissions.get('edit', 0)}")
+            logger.info(f"   • Delete: {permissions.get('delete', 0)}")
+            logger.info(f"   • Manage: {permissions.get('manage', 0)}")
+            
             return True
         except Exception as e:
             logger.error(f"❌ Lỗi grant admin: {e}")
             return False
-
+        
     def revoke_admin_permission(group_id, admin_id):
         try:
             conn = sqlite3.connect(DB_PATH)
@@ -6768,11 +6825,10 @@ try:
             
             # ===== QUAN TRỌNG: XÁC ĐỊNH TARGET USER DỰA TRÊN CHAT TYPE =====
             if chat_type == 'private':
-                # PRIVATE CHAT: LUÔN XỬ LÝ DỮ LIỆU CỦA CHÍNH USER
                 target_user_id = current_user_id
                 is_admin = False
                 is_owner_user = False
-                owner_id = current_user_id  # Trong private, owner là chính mình
+                owner_id = current_user_id
                 logger.info(f"💬 PRIVATE CALLBACK: xử lý cho user {target_user_id}")
             else:
                 # GROUP CHAT: Lấy thông tin từ context
@@ -6780,18 +6836,26 @@ try:
                 is_admin = ctx.bot_data.get('is_admin', False)
                 is_owner_user = (current_user_id == owner_id)
                 
+                # Log chi tiết
+                logger.info(f"👥 GROUP CALLBACK - Chi tiết:")
+                logger.info(f"   • current_user: {current_user_id}")
+                logger.info(f"   • owner_id từ context: {owner_id}")
+                logger.info(f"   • is_admin: {is_admin}")
+                logger.info(f"   • is_owner_user: {is_owner_user}")
+                
                 # Kiểm tra quyền trong group
                 if not check_permission(chat_id, current_user_id, 'view'):
+                    logger.warning(f"⛔ User {current_user_id} không có quyền view trong group")
                     await safe_edit_message(query, "❌ Bạn không có quyền sử dụng bot trong nhóm này!")
                     return
                 
                 # Xác định target_user_id
                 if is_admin or is_owner_user:
                     target_user_id = owner_id
-                    logger.info(f"👥 GROUP CALLBACK: admin {current_user_id} xử lý dữ liệu owner {target_user_id}")
+                    logger.info(f"👑 Admin/owner thao tác: target = owner {target_user_id}")
                 else:
                     target_user_id = current_user_id
-                    logger.info(f"👥 GROUP CALLBACK: user {current_user_id} tự xử lý dữ liệu")
+                    logger.info(f"👤 User thường tự thao tác: target = self {target_user_id}")
             
             logger.info(f"🎯 Target user: {target_user_id}, IsAdmin: {is_admin}, IsOwner: {is_owner_user}")
             
