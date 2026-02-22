@@ -7002,7 +7002,7 @@ try:
                        f"❌ *Không thể khôi phục!*\n\n"
                        f"Bạn có chắc chắn muốn xóa?")
                 
-                await (query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
                 return
             
             # ===========================================
