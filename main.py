@@ -8004,28 +8004,23 @@ try:
             # ===========================================
             
             elif data == "settings_members":
-                await query.edit_message_text("🔄 Đang lấy danh sách thành viên...")
+                await query.edit_message_text("🔄 Đang tải danh sách thành viên...")
                 
                 try:
-                    # Lấy danh sách admin từ Telegram
-                    logger.info("📋 Bắt đầu lấy danh sách admin từ Telegram...")
+                    # Lấy danh sách thành viên từ Telegram
                     admins = await ctx.bot.get_chat_administrators(chat_id)
-                    logger.info(f"✅ Lấy được {len(admins)} admin từ Telegram")
                     
-                    msg = "👥 *DANH SÁCH THÀNH VIÊN*\n━━━━━━━━━━━━━━━━\n\n"
+                    # Tạo message và keyboard
+                    msg_lines = ["👥 *DANH SÁCH THÀNH VIÊN*", "━━━━━━━━━━━━━━━━\n"]
                     keyboard = []
                     row = []
-                    member_count = 0
                     
                     for admin in admins:
                         user = admin.user
                         if user.is_bot:
                             continue
-                        
-                        member_count += 1
-                        logger.info(f"   • Đang xử lý user {user.id}: {user.first_name}")
-                        
-                        # Lấy thông tin quyền hiện tại
+                            
+                        # Lấy quyền hiện tại từ DB
                         conn = sqlite3.connect(DB_PATH)
                         c = conn.cursor()
                         c.execute('''SELECT can_view_all, can_edit_all, can_delete_all, can_manage_perms 
@@ -8033,114 +8028,116 @@ try:
                         perm = c.fetchone()
                         conn.close()
                         
-                        # Xác định icon
+                        # Xác định icon và tên hiển thị
                         if admin.status == 'creator':
-                            status = "👑"  # Chủ sở hữu
+                            icon = "👑"
                         elif perm:
-                            status = "🔰"  # Đã được cấp quyền
+                            icon = "🔰" 
                         else:
-                            status = "👤"  # Thành viên thường
+                            icon = "👤"
                         
-                        name = f"@{user.username}" if user.username else user.first_name
-                        msg += f"{status} {name} (`{user.id}`)\n"
+                        display_name = f"@{user.username}" if user.username else user.first_name
+                        msg_lines.append(f"{icon} {display_name} (`{user.id}`)")
                         
-                        # Thêm nút để quản lý từng người
-                        if admin.status == 'creator' or perm or check_permission(chat_id, query.from_user.id, 'manage'):
+                        # Chỉ thêm nút quản lý nếu user hiện tại có quyền manage
+                        if check_permission(chat_id, query.from_user.id, 'manage'):
                             btn_text = f"⚙️ {user.first_name[:10]}"
                             if len(user.first_name) > 10:
                                 btn_text = f"⚙️ {user.first_name[:8]}..."
+                            
                             row.append(InlineKeyboardButton(btn_text, callback_data=f"perm_user_{user.id}"))
-                        
-                        if len(row) == 2:
-                            keyboard.append(row)
-                            row = []
+                            
+                            if len(row) == 2:
+                                keyboard.append(row)
+                                row = []
                     
-                    logger.info(f"✅ Đã xử lý {member_count} thành viên")
-                    
+                    # Thêm hàng cuối cùng nếu còn
                     if row:
                         keyboard.append(row)
                     
+                    # Nút quay lại
                     keyboard.append([InlineKeyboardButton("🔙 Về cài đặt", callback_data="back_to_settings")])
                     
-                    logger.info("📤 Đang gửi message...")
+                    msg = "\n".join(msg_lines) + f"\n\n🕐 {format_vn_time_short()}"
                     await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
-                    logger.info("✅ Đã gửi message thành công")
                     return
                     
                 except Exception as e:
-                    logger.error(f"❌ Lỗi settings_members: {e}", exc_info=True)
-                    await safe_edit_message(query, f"❌ Lỗi: {str(e)[:100]}")
+                    logger.error(f"❌ Lỗi settings_members: {e}")
+                    await safe_edit_message(query, "❌ Không thể tải danh sách thành viên!")
                     return
             
             elif data == "settings_permissions":
-                msg = ("🔐 *PHÂN QUYỀN CHI TIẾT*\n"
-                       "━━━━━━━━━━━━━━━━\n\n"
-                       "*Các mức quyền:*\n\n"
-                       "👁 *XEM*\n"
-                       "• Xem giá coin\n"
-                       "• Xem portfolio\n"
-                       "• Xem lợi nhuận\n"
-                       "• Xem thống kê\n\n"
-                       "✏️ *SỬA*\n"
-                       "• Thêm giao dịch mới\n"
-                       "• Sửa giao dịch\n"
-                       "• Bao gồm quyền XEM\n\n"
-                       "🗑 *XOÁ*\n"
-                       "• Xóa giao dịch\n"
-                       "• Bao gồm quyền XEM\n\n"
-                       "🔐 *QUẢN LÝ*\n"
-                       "• Cấp/thu hồi quyền\n"
-                       "• Quản lý cài đặt\n"
-                       "• Bao gồm TẤT CẢ quyền\n\n"
-                       "👑 *FULL QUYỀN*\n"
-                       "• Tất cả quyền trên\n\n"
-                       "*Cách cấp quyền:*\n"
-                       "1. Chọn *QUẢN LÝ THÀNH VIÊN*\n"
-                       "2. Chọn người cần cấp quyền\n"
-                       "3. Tick vào các quyền muốn cấp\n"
-                       "4. Nhấn *LƯU THAY ĐỔI*")
+                msg = (
+                    "🔐 *HƯỚNG DẪN PHÂN QUYỀN*\n"
+                    "━━━━━━━━━━━━━━━━\n\n"
+                    "👁 *XEM*\n"
+                    "• Xem giá coin, portfolio, lợi nhuận\n\n"
+                    "✏️ *SỬA*\n"
+                    "• Thêm/sửa giao dịch (bao gồm quyền XEM)\n\n"
+                    "🗑 *XOÁ*\n"
+                    "• Xóa giao dịch (bao gồm quyền XEM)\n\n"
+                    "🔐 *QUẢN LÝ*\n"
+                    "• Cấp/thu hồi quyền cho người khác\n"
+                    "• Bao gồm TẤT CẢ quyền trên\n\n"
+                    "⚡ *Cách thực hiện:*\n"
+                    "1️⃣ Chọn *QUẢN LÝ THÀNH VIÊN*\n"
+                    "2️⃣ Chọn người cần cấp quyền\n"
+                    "3️⃣ Tick vào các quyền muốn cấp\n"
+                    "4️⃣ Nhấn *LƯU THAY ĐỔI*"
+                )
+                
                 keyboard = [
                     [InlineKeyboardButton("👥 QUẢN LÝ THÀNH VIÊN", callback_data="settings_members")],
                     [InlineKeyboardButton("🔙 Về cài đặt", callback_data="back_to_settings")]
                 ]
+                
                 await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
                 return
             
             elif data == "settings_list":
                 conn = sqlite3.connect(DB_PATH)
                 c = conn.cursor()
-                c.execute('''SELECT p.user_id, p.can_view_all, p.can_edit_all, p.can_delete_all, p.can_manage_perms,
-                                   u.username, u.first_name 
-                            FROM permissions p 
-                            LEFT JOIN users u ON p.user_id = u.user_id 
-                            WHERE p.group_id = ?
-                            ORDER BY p.created_at''', (chat_id,))
+                c.execute('''
+                    SELECT p.user_id, p.can_view_all, p.can_edit_all, p.can_delete_all, p.can_manage_perms,
+                           u.username, u.first_name 
+                    FROM permissions p 
+                    LEFT JOIN users u ON p.user_id = u.user_id 
+                    WHERE p.group_id = ?
+                    ORDER BY p.created_at
+                ''', (chat_id,))
                 permissions = c.fetchall()
                 conn.close()
                 
                 if not permissions:
                     msg = "📋 *DANH SÁCH QUYỀN*\n━━━━━━━━━━━━━━━━\n\nChưa có ai được cấp quyền đặc biệt."
                 else:
-                    msg = "📋 *DANH SÁCH QUYỀN HIỆN TẠI*\n━━━━━━━━━━━━━━━━\n\n"
+                    msg_lines = ["📋 *DANH SÁCH QUYỀN HIỆN TẠI*", "━━━━━━━━━━━━━━━━\n"]
+                    
                     for p in permissions:
                         user_id, view, edit, delete, manage, username, first_name = p
                         name = f"@{username}" if username else first_name or f"User {user_id}"
                         
                         perms = []
-                        if view: perms.append("👁 Xem")
-                        if edit: perms.append("✏️ Sửa")
-                        if delete: perms.append("🗑 Xóa")
-                        if manage: perms.append("🔐 Quản lý")
+                        if view: perms.append("👁")
+                        if edit: perms.append("✏️")
+                        if delete: perms.append("🗑")
+                        if manage: perms.append("🔐")
                         
-                        msg += f"• {name} (`{user_id}`)\n"
-                        msg += f"  Quyền: {', '.join(perms) if perms else '❌ Không có'}\n\n"
+                        perms_display = ' '.join(perms) if perms else '❌'
+                        msg_lines.append(f"• {name}: {perms_display}")
+                    
+                    msg = "\n".join(msg_lines)
+                
+                msg += f"\n\n🕐 {format_vn_time_short()}"
                 
                 keyboard = [[InlineKeyboardButton("🔙 Về cài đặt", callback_data="back_to_settings")]]
                 await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
                 return
             
             elif data == "settings_sync":
-                await query.edit_message_text("🔄 Đang đồng bộ danh sách admin...")
+                await query.edit_message_text("🔄 Đang đồng bộ danh sách admin từ Telegram...")
+                
                 try:
                     admins = await ctx.bot.get_chat_administrators(chat_id)
                     synced = 0
@@ -8149,26 +8146,29 @@ try:
                     for admin in admins:
                         if admin.user and not admin.user.is_bot:
                             await update_user_info_async(admin.user)
+                            
                             conn = sqlite3.connect(DB_PATH)
                             c = conn.cursor()
-                            c.execute('''SELECT id FROM permissions WHERE group_id = ? AND user_id = ?''', (chat_id, admin.user.id))
+                            c.execute('''SELECT id FROM permissions WHERE group_id = ? AND user_id = ?''', 
+                                     (chat_id, admin.user.id))
                             exists = c.fetchone()
                             
                             if not exists:
-                                permissions = {'view': 1, 'edit': 1, 'delete': 1, 'manage': 0}
+                                # Tự động cấp quyền cho admin Telegram
+                                perms = {'view': 1, 'edit': 1, 'delete': 1, 'manage': 0}
                                 if admin.status == 'creator':
-                                    permissions = {'view': 1, 'edit': 1, 'delete': 1, 'manage': 1}
+                                    perms = {'view': 1, 'edit': 1, 'delete': 1, 'manage': 1}
                                 
-                                c.execute('''INSERT INTO permissions 
-                                            (group_id, user_id, granted_by, is_approved, role, 
-                                             can_view_all, can_edit_all, can_delete_all, can_manage_perms,
-                                             created_at, approved_at) 
-                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                                          (chat_id, admin.user.id, chat_id, 1, 'staff',
-                                           permissions['view'], permissions['edit'], 
-                                           permissions['delete'], permissions['manage'],
-                                           get_vn_time().strftime("%Y-%m-%d %H:%M:%S"),
-                                           get_vn_time().strftime("%Y-%m-%d %H:%M:%S")))
+                                c.execute('''
+                                    INSERT INTO permissions 
+                                    (group_id, user_id, granted_by, is_approved, role, 
+                                     can_view_all, can_edit_all, can_delete_all, can_manage_perms,
+                                     created_at, approved_at) 
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                ''', (chat_id, admin.user.id, chat_id, 1, 'staff',
+                                      perms['view'], perms['edit'], perms['delete'], perms['manage'],
+                                      get_vn_time().strftime("%Y-%m-%d %H:%M:%S"),
+                                      get_vn_time().strftime("%Y-%m-%d %H:%M:%S")))
                                 synced += 1
                             else:
                                 updated += 1
@@ -8176,15 +8176,18 @@ try:
                             conn.commit()
                             conn.close()
                     
-                    msg = (f"✅ *ĐỒNG BỘ THÀNH CÔNG*\n"
-                           f"━━━━━━━━━━━━━━━━\n\n"
-                           f"• Tổng số admin: {len(admins)}\n"
-                           f"• Đã cấp quyền mới: {synced}\n"
-                           f"• Đã cập nhật: {updated}\n\n"
-                           f"🕐 {format_vn_time()}")
+                    msg = (
+                        f"✅ *ĐỒNG BỘ THÀNH CÔNG*\n"
+                        f"━━━━━━━━━━━━━━━━\n\n"
+                        f"📊 *Kết quả:*\n"
+                        f"• Tổng số admin: {len(admins)}\n"
+                        f"• Đã cấp quyền mới: {synced}\n"
+                        f"• Đã cập nhật: {updated}\n\n"
+                        f"🕐 {format_vn_time()}"
+                    )
                 except Exception as e:
                     logger.error(f"❌ Lỗi đồng bộ: {e}")
-                    msg = f"❌ Lỗi đồng bộ: {str(e)[:100]}"
+                    msg = f"❌ Lỗi: {str(e)[:100]}"
                 
                 keyboard = [[InlineKeyboardButton("🔙 Về cài đặt", callback_data="back_to_settings")]]
                 await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -8193,30 +8196,45 @@ try:
             elif data == "back_to_settings":
                 keyboard = [
                     [InlineKeyboardButton("👥 QUẢN LÝ THÀNH VIÊN", callback_data="settings_members")],
-                    [InlineKeyboardButton("🔐 PHÂN QUYỀN CHI TIẾT", callback_data="settings_permissions")],
+                    [InlineKeyboardButton("🔐 HƯỚNG DẪN QUYỀN", callback_data="settings_permissions")],
                     [InlineKeyboardButton("📋 DANH SÁCH QUYỀN", callback_data="settings_list")],
                     [InlineKeyboardButton("🔄 ĐỒNG BỘ ADMIN", callback_data="settings_sync")],
                     [InlineKeyboardButton("🔙 VỀ MENU CHÍNH", callback_data="back_to_main")]
                 ]
-                msg = (f"⚙️ *CÀI ĐẶT NHÓM*\n"
-                       f"━━━━━━━━━━━━━━━━\n\n"
-                       f"Chọn chức năng quản lý:\n\n"
-                       f"🕐 {format_vn_time()}")
+                
+                msg = (
+                    "⚙️ *CÀI ĐẶT NHÓM*\n"
+                    "━━━━━━━━━━━━━━━━\n\n"
+                    "👥 *Quản lý thành viên*\n"
+                    "• Xem danh sách và phân quyền\n\n"
+                    "🔐 *Hướng dẫn quyền*\n"
+                    "• Giải thích các mức quyền\n\n"
+                    "📋 *Danh sách quyền*\n"
+                    "• Xem quyền hiện tại của mọi người\n\n"
+                    "🔄 *Đồng bộ admin*\n"
+                    "• Tự động cấp quyền cho admin Telegram\n\n"
+                    f"🕐 {format_vn_time()}"
+                )
+                
                 await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
                 return
             
             elif data.startswith("perm_user_"):
                 target_id = int(data.replace("perm_user_", ""))
+                
+                # Không cho tự quản lý
                 if target_id == query.from_user.id:
                     await safe_edit_message(query, "❌ Bạn không thể tự phân quyền cho chính mình!")
                     return
                 
+                # Lấy thông tin user
                 try:
                     chat = await ctx.bot.get_chat(target_id)
                     name = f"@{chat.username}" if chat.username else chat.first_name
                 except:
                     name = f"User {target_id}"
                 
+                # Lấy quyền hiện tại
                 conn = sqlite3.connect(DB_PATH)
                 c = conn.cursor()
                 c.execute('''SELECT can_view_all, can_edit_all, can_delete_all, can_manage_perms 
@@ -8229,9 +8247,38 @@ try:
                 delete = current[2] if current else 0
                 manage = current[3] if current else 0
                 
-                key = f"temp_perm_{target_id}"
-                ctx.bot_data[key] = (view, edit, delete, manage)
-                await update_perm_message(query, ctx, target_id, view, edit, delete, manage)
+                # Lưu tạm vào bot_data
+                ctx.bot_data[f"temp_perm_{target_id}"] = (view, edit, delete, manage)
+                
+                # Hiển thị giao diện phân quyền
+                msg = (
+                    f"🔐 *PHÂN QUYỀN CHO {name}*\n"
+                    f"━━━━━━━━━━━━━━━━\n\n"
+                    f"User ID: `{target_id}`\n\n"
+                    f"*Quyền hiện tại:*\n"
+                    f"{'✅' if view else '⬜'} 👁 XEM\n"
+                    f"{'✅' if edit else '⬜'} ✏️ SỬA\n"
+                    f"{'✅' if delete else '⬜'} 🗑 XÓA\n"
+                    f"{'✅' if manage else '⬜'} 🔐 QUẢN LÝ\n\n"
+                    f"*Chọn để thay đổi:*"
+                )
+                
+                keyboard = [
+                    [
+                        InlineKeyboardButton(f"{'✅' if view else '⬜'} 👁", callback_data=f"perm_toggle_{target_id}_view"),
+                        InlineKeyboardButton(f"{'✅' if edit else '⬜'} ✏️", callback_data=f"perm_toggle_{target_id}_edit"),
+                        InlineKeyboardButton(f"{'✅' if delete else '⬜'} 🗑", callback_data=f"perm_toggle_{target_id}_delete"),
+                        InlineKeyboardButton(f"{'✅' if manage else '⬜'} 🔐", callback_data=f"perm_toggle_{target_id}_manage")
+                    ],
+                    [
+                        InlineKeyboardButton("👑 FULL", callback_data=f"perm_set_{target_id}_full"),
+                        InlineKeyboardButton("❌ XÓA HẾT", callback_data=f"perm_set_{target_id}_none")
+                    ],
+                    [InlineKeyboardButton("💾 LƯU", callback_data=f"perm_save_{target_id}")],
+                    [InlineKeyboardButton("🔙 Quay lại", callback_data="settings_members")]
+                ]
+                
+                await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
                 return
             
             elif data.startswith("perm_toggle_"):
@@ -8239,12 +8286,14 @@ try:
                 target_id = int(parts[2])
                 perm_type = parts[3]
                 
+                # Lấy quyền tạm thời
                 key = f"temp_perm_{target_id}"
                 temp = ctx.bot_data.get(key)
                 
                 if temp:
                     view, edit, delete, manage = temp
                 else:
+                    # Fallback: lấy từ DB
                     conn = sqlite3.connect(DB_PATH)
                     c = conn.cursor()
                     c.execute('''SELECT can_view_all, can_edit_all, can_delete_all, can_manage_perms 
@@ -8256,6 +8305,7 @@ try:
                     delete = current[2] if current else 0
                     manage = current[3] if current else 0
                 
+                # Toggle
                 if perm_type == 'view':
                     view = 1 - view
                 elif perm_type == 'edit':
@@ -8265,7 +8315,10 @@ try:
                 elif perm_type == 'manage':
                     manage = 1 - manage
                 
+                # Lưu lại
                 ctx.bot_data[key] = (view, edit, delete, manage)
+                
+                # Cập nhật message
                 await update_perm_message(query, ctx, target_id, view, edit, delete, manage)
                 return
             
@@ -8279,8 +8332,7 @@ try:
                 elif preset == 'none':
                     view = edit = delete = manage = 0
                 
-                key = f"temp_perm_{target_id}"
-                ctx.bot_data[key] = (view, edit, delete, manage)
+                ctx.bot_data[f"temp_perm_{target_id}"] = (view, edit, delete, manage)
                 await update_perm_message(query, ctx, target_id, view, edit, delete, manage)
                 return
             
@@ -8289,51 +8341,61 @@ try:
                 key = f"temp_perm_{target_id}"
                 temp = ctx.bot_data.get(key)
                 
-                if temp:
-                    view, edit, delete, manage = temp
-                    permissions = {'view': view, 'edit': edit, 'delete': delete, 'manage': manage}
-                    
-                    if grant_permission(chat_id, target_id, query.from_user.id, permissions):
-                        if key in ctx.bot_data:
-                            del ctx.bot_data[key]
-                        
-                        try:
-                            chat = await ctx.bot.get_chat(target_id)
-                            name = f"@{chat.username}" if chat.username else chat.first_name
-                        except:
-                            name = f"User {target_id}"
-                        
-                        perms = []
-                        if view: perms.append("👁 Xem")
-                        if edit: perms.append("✏️ Sửa")
-                        if delete: perms.append("🗑 Xóa")
-                        if manage: perms.append("🔐 Quản lý")
-                        
-                        msg = (f"✅ *ĐÃ LƯU QUYỀN CHO {name}*\n"
-                               f"━━━━━━━━━━━━━━━━\n\n"
-                               f"Quyền được cấp: {', '.join(perms) if perms else '❌ Không có'}\n\n"
-                               f"🕐 {format_vn_time()}")
-                        
-                        keyboard = [[InlineKeyboardButton("🔙 Quay lại danh sách", callback_data="settings_members")]]
-                        await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
-                        
-                        try:
-                            await ctx.bot.send_message(
-                                target_id,
-                                f"🔔 *THÔNG BÁO QUYỀN TRONG NHÓM*\n\n"
-                                f"Bạn đã được cấp quyền trong nhóm:\n"
-                                f"• {query.message.chat.title}\n"
-                                f"• Quyền: {', '.join(perms) if perms else '❌ Không có'}\n\n"
-                                f"🕐 {format_vn_time()}",
-                                parse_mode=ParseMode.MARKDOWN
-                            )
-                        except:
-                            pass
-                    else:
-                        await safe_edit_message(query, "❌ Lỗi khi lưu quyền!")
-                else:
-                    await safe_edit_message(query, "ℹ️ Không có thay đổi quyền nào!")
+                if not temp:
+                    await safe_edit_message(query, "ℹ️ Không có thay đổi nào để lưu!")
                     return
+                
+                view, edit, delete, manage = temp
+                
+                # Lưu vào database
+                permissions = {'view': view, 'edit': edit, 'delete': delete, 'manage': manage}
+                
+                if grant_permission(chat_id, target_id, query.from_user.id, permissions):
+                    # Xóa temp
+                    if key in ctx.bot_data:
+                        del ctx.bot_data[key]
+                    
+                    # Lấy tên user
+                    try:
+                        chat = await ctx.bot.get_chat(target_id)
+                        name = f"@{chat.username}" if chat.username else chat.first_name
+                    except:
+                        name = f"User {target_id}"
+                    
+                    # Tạo message thông báo
+                    perms = []
+                    if view: perms.append("👁 Xem")
+                    if edit: perms.append("✏️ Sửa")
+                    if delete: perms.append("🗑 Xóa")
+                    if manage: perms.append("🔐 Quản lý")
+                    
+                    msg = (
+                        f"✅ *ĐÃ LƯU QUYỀN CHO {name}*\n"
+                        f"━━━━━━━━━━━━━━━━\n\n"
+                        f"Quyền được cấp: {', '.join(perms) if perms else '❌ Không có'}\n\n"
+                        f"🕐 {format_vn_time()}"
+                    )
+                    
+                    keyboard = [[InlineKeyboardButton("🔙 Quay lại danh sách", callback_data="settings_members")]]
+                    await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                    
+                    # Thông báo cho user được cấp quyền
+                    try:
+                        await ctx.bot.send_message(
+                            target_id,
+                            f"🔔 *THÔNG BÁO QUYỀN TRONG NHÓM*\n\n"
+                            f"Bạn đã được cấp quyền trong nhóm:\n"
+                            f"• {query.message.chat.title}\n"
+                            f"• Quyền: {', '.join(perms) if perms else '❌ Không có'}\n\n"
+                            f"🕐 {format_vn_time()}",
+                            parse_mode=ParseMode.MARKDOWN
+                        )
+                    except:
+                        pass
+                else:
+                    await safe_edit_message(query, "❌ Lỗi khi lưu quyền!")
+                
+                return
         
             # ===========================================
             # XỬ LÝ CALLBACK KHÔNG XÁC ĐỊNH
