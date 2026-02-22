@@ -8415,31 +8415,48 @@ try:
             elif data.startswith("lang_"):
                 lang = data.replace("lang_", "")
                 user_id = query.from_user.id
+                current_lang = get_lang(user_id)
                 
+                # Lưu ngôn ngữ mới
                 if lang == 'vi':
                     LANGUAGE[user_id] = 'VI'
-                    msg = "✅ Đã chuyển sang Tiếng Việt!"
+                    success_msg = "✅ Đã chuyển sang Tiếng Việt!"
                 elif lang == 'zh':
                     LANGUAGE[user_id] = 'ZH'
-                    msg = "✅ 已切换到中文！"
+                    success_msg = "✅ 已切换到中文！"
+                else:
+                    await safe_edit_message(query, "❌ Ngôn ngữ không hợp lệ!")
+                    return
                 
-                await safe_edit_message(query, msg)
+                # QUAN TRỌNG: Chỉ cập nhật message hiện tại, không tạo mới
+                # Hiển thị thông báo thành công và nút quay lại
+                keyboard = [[InlineKeyboardButton("🔙 Quay lại cài đặt", callback_data="back_to_settings")]]
+                await safe_edit_message(query, success_msg, reply_markup=InlineKeyboardMarkup(keyboard))
                 
-                # Quay về menu chính
-                await query.message.reply_text(
-                    "👇 Chọn chức năng:" if get_lang(user_id) == 'VI' else "👇 选择功能:",
-                    reply_markup=get_main_keyboard(user_id)
-                )
+                # Không gửi message mới, chỉ cập nhật message cũ
                 return
                 
             elif data == "lang_menu":
                 user_id = query.from_user.id
+                current_lang = get_lang(user_id)
+                
+                # Xác định ngôn ngữ hiện tại để hiển thị
+                if current_lang == 'VI':
+                    current_display = "🇻🇳 Tiếng Việt"
+                else:
+                    current_display = "🇨🇳 中文"
+                
                 keyboard = [
                     [InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="lang_vi")],
                     [InlineKeyboardButton("🇨🇳 中文", callback_data="lang_zh")],
                     [InlineKeyboardButton("🔙 Quay lại", callback_data="back_to_settings")]
                 ]
-                msg = "🌐 *CHỌN NGÔN NGỮ*\n━━━━━━━━━━━━━━━━\n\nVui lòng chọn ngôn ngữ:"
+                
+                msg = (f"🌐 *CHỌN NGÔN NGỮ*\n"
+                       f"━━━━━━━━━━━━━━━━\n\n"
+                       f"Ngôn ngữ hiện tại: {current_display}\n\n"
+                       f"Vui lòng chọn ngôn ngữ mới:")
+                
                 await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
                 return
         
