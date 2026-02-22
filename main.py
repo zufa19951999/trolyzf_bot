@@ -222,7 +222,78 @@ def get_effective_user_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     logger.info(f"💬 Private: user {user_id} tự quản lý data riêng")
     return user_id, user_id
+    
+# ==================== ĐA NGÔN NGỮ ====================
+LANGUAGE = {}  # Sẽ lưu ngôn ngữ của từng user
 
+# Tiếng Việt
+VI = {
+    'welcome': "🚀 *ĐẦU TƯ COIN & QUẢN LÝ CHI TIÊU*",
+    'price': "💰 Giá",
+    'buy': "Mua",
+    'sell': "Bán",
+    'profit': "Lợi nhuận",
+    'stats': "Thống kê",
+    'settings': "Cài đặt",
+    'help': "Hướng dẫn",
+    'back': "Quay lại",
+    'confirm': "Xác nhận",
+    'cancel': "Hủy",
+    'save': "Lưu",
+    'delete': "Xóa",
+    'edit': "Sửa",
+    'view': "Xem",
+    'manage': "Quản lý",
+    'members': "Thành viên",
+    'permissions': "Phân quyền",
+    'sync': "Đồng bộ",
+    'list': "Danh sách",
+    'time': "Thời gian",
+    'error': "Lỗi",
+    'success': "Thành công",
+    'warning': "Cảnh báo",
+}
+
+# Tiếng Trung (Giản thể)
+ZH = {
+    'welcome': "🚀 *加密货币与支出管理机器人*",
+    'price': "💰 价格",
+    'buy': "购买",
+    'sell': "出售", 
+    'profit': "利润",
+    'stats': "统计",
+    'settings': "设置",
+    'help': "帮助",
+    'back': "返回",
+    'confirm': "确认",
+    'cancel': "取消",
+    'save': "保存",
+    'delete': "删除",
+    'edit': "编辑",
+    'view': "查看",
+    'manage': "管理",
+    'members': "成员",
+    'permissions': "权限",
+    'sync': "同步",
+    'list': "列表",
+    'time': "时间",
+    'error': "错误",
+    'success': "成功",
+    'warning': "警告",
+}
+
+# Hàm lấy ngôn ngữ của user
+def get_lang(user_id):
+    """Lấy ngôn ngữ của user (mặc định là VI)"""
+    return LANGUAGE.get(user_id, 'VI')
+
+# Hàm dịch
+def _(text, user_id):
+    """Dịch text sang ngôn ngữ của user"""
+    lang = get_lang(user_id)
+    if lang == 'ZH':
+        return ZH.get(text, VI.get(text, text))
+    return VI.get(text, text)
 # ==================== USERNAME CACHE ====================
 class UsernameCache:
     def __init__(self):
@@ -1971,33 +2042,60 @@ try:
                 conn.close()
 
     # ==================== KEYBOARD ====================
-    def get_main_keyboard():
-        keyboard = [
-            [KeyboardButton("💰 ĐẦU TƯ COIN"), KeyboardButton("💵 QUẢN LÝ CHI TIÊU")],
-            [KeyboardButton("⚙️ CÀI ĐẶT"), KeyboardButton("🤔 HƯỚNG DẪN")] 
-        ]
+    def get_main_keyboard(user_id=None):
+        lang = get_lang(user_id) if user_id else 'VI'
+        
+        if lang == 'ZH':
+            keyboard = [
+                [KeyboardButton("💰 加密货币"), KeyboardButton("💵 支出管理")],
+                [KeyboardButton("⚙️ 设置"), KeyboardButton("🤔 帮助")],
+            ]
+        else:
+            keyboard = [
+                [KeyboardButton("💰 ĐẦU TƯ COIN"), KeyboardButton("💵 QUẢN LÝ CHI TIÊU")],
+                [KeyboardButton("⚙️ CÀI ĐẶT"), KeyboardButton("🤔 HƯỚNG DẪN")],
+            ]
         return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
     def get_invest_menu_keyboard(user_id=None, group_id=None, chat_type=None):
-        keyboard = [
-            [InlineKeyboardButton("₿ BTC", callback_data="price_BTC"),
-             InlineKeyboardButton("Ξ ETH", callback_data="price_ETH"),
-             InlineKeyboardButton("Ξ SOL", callback_data="price_SOL"),
-             InlineKeyboardButton("💵 USDT", callback_data="price_USDT")],
-            [InlineKeyboardButton("📊 Top 10", callback_data="show_top10"),
-             InlineKeyboardButton("📈 Lợi nhuận", callback_data="show_profit")],
-            [InlineKeyboardButton("✏️ Sửa/Xóa", callback_data="edit_transactions"),
-             InlineKeyboardButton("📊 Thống kê", callback_data="show_stats")],
-            [InlineKeyboardButton("🔔 Cảnh báo giá", callback_data="show_alerts"),
-             InlineKeyboardButton("🔐 Xuất dữ liệu", callback_data="export_master")],  # <-- NÚT DUY NHẤT
-            [InlineKeyboardButton("➕ Mua coin", callback_data="show_buy"),
-             InlineKeyboardButton("➖ Bán coin", callback_data="show_sell")]
-        ]
+        lang = get_lang(user_id) if user_id else 'VI'
+        
+        if lang == 'ZH':
+            keyboard = [
+                [InlineKeyboardButton("₿ BTC", callback_data="price_BTC"),
+                 InlineKeyboardButton("Ξ ETH", callback_data="price_ETH"),
+                 InlineKeyboardButton("Ξ SOL", callback_data="price_SOL"),
+                 InlineKeyboardButton("💵 USDT", callback_data="price_USDT")],
+                [InlineKeyboardButton("📊 前10", callback_data="show_top10"),
+                 InlineKeyboardButton("📈 利润", callback_data="show_profit")],
+                [InlineKeyboardButton("✏️ 编辑/删除", callback_data="edit_transactions"),
+                 InlineKeyboardButton("📊 统计", callback_data="show_stats")],
+                [InlineKeyboardButton("🔔 价格提醒", callback_data="show_alerts"),
+                 InlineKeyboardButton("🔐 导出数据", callback_data="export_master")],
+                [InlineKeyboardButton("➕ 购买", callback_data="show_buy"),
+                 InlineKeyboardButton("➖ 出售", callback_data="show_sell")]
+            ]
+        else:
+            keyboard = [
+                [InlineKeyboardButton("₿ BTC", callback_data="price_BTC"),
+                 InlineKeyboardButton("Ξ ETH", callback_data="price_ETH"),
+                 InlineKeyboardButton("Ξ SOL", callback_data="price_SOL"),
+                 InlineKeyboardButton("💵 USDT", callback_data="price_USDT")],
+                [InlineKeyboardButton("📊 Top 10", callback_data="show_top10"),
+                 InlineKeyboardButton("📈 Lợi nhuận", callback_data="show_profit")],
+                [InlineKeyboardButton("✏️ Sửa/Xóa", callback_data="edit_transactions"),
+                 InlineKeyboardButton("📊 Thống kê", callback_data="show_stats")],
+                [InlineKeyboardButton("🔔 Cảnh báo giá", callback_data="show_alerts"),
+                 InlineKeyboardButton("🔐 Xuất dữ liệu", callback_data="export_master")],
+                [InlineKeyboardButton("➕ Mua coin", callback_data="show_buy"),
+                 InlineKeyboardButton("➖ Bán coin", callback_data="show_sell")]
+            ]
         
         # Thêm nút ADMIN nếu cần
         if group_id and user_id:
             if chat_type in ['group', 'supergroup'] and check_permission(group_id, user_id, 'view'):
-                keyboard.append([InlineKeyboardButton("👑 ADMIN", callback_data="admin_panel")])
+                admin_text = "👑 ADMIN" if lang == 'VI' else "👑 管理员"
+                keyboard.append([InlineKeyboardButton(admin_text, callback_data="admin_panel")])
         
         return InlineKeyboardMarkup(keyboard)
 
@@ -2792,30 +2890,54 @@ try:
                 if ctx.message and ctx.message.reply_to_message:
                     return ctx.message.reply_to_message.from_user.id
         return None
-
+        
     @auto_update_user
     async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_user.id
+        lang = get_lang(user_id)
+        
         if update.effective_chat.type in ['group', 'supergroup']:
-            welcome_msg = ("🚀 *ĐẦU TƯ COIN & QUẢN LÝ CHI TIÊU*\n\n"
-                           "🤖 Bot đã sẵn sàng!\n\n"
-                           "*Các lệnh trong nhóm:*\n"
-                           "• `/s btc eth` - Xem giá coin\n"
-                           "• `/usdt` - Tỷ giá USDT/VND\n"
-                           "• `/buy btc 0.5 40000` - Mua coin\n"
-                           "• `/sell btc 0.2` - Bán coin\n\n"
-                           "📱 *Vuốt xuống để hiện menu*\n"
-                           f"🕐 {format_vn_time()}")
-            await update.message.reply_text(welcome_msg, parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_keyboard())
+            if lang == 'ZH':
+                welcome_msg = ("🚀 *加密货币与支出管理机器人*\n\n"
+                               "🤖 机器人已就绪！\n\n"
+                               "*群组命令:*\n"
+                               "• `/s btc eth` - 查看价格\n"
+                               "• `/usdt` - USDT/VND汇率\n"
+                               "• `/buy btc 0.5 40000` - 购买\n"
+                               "• `/sell btc 0.2` - 出售\n\n"
+                               "📱 *向下滑动显示菜单*\n"
+                               f"🕐 {format_vn_time()}")
+            else:
+                welcome_msg = ("🚀 *ĐẦU TƯ COIN & QUẢN LÝ CHI TIÊU*\n\n"
+                               "🤖 Bot đã sẵn sàng!\n\n"
+                               "*Các lệnh trong nhóm:*\n"
+                               "• `/s btc eth` - Xem giá coin\n"
+                               "• `/usdt` - Tỷ giá USDT/VND\n"
+                               "• `/buy btc 0.5 40000` - Mua coin\n"
+                               "• `/sell btc 0.2` - Bán coin\n\n"
+                               "📱 *Vuốt xuống để hiện menu*\n"
+                               f"🕐 {format_vn_time()}")
+            await update.message.reply_text(welcome_msg, parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_keyboard(user_id))
         else:
-            welcome_msg = ("🚀 *ĐẦU TƯ COIN & QUẢN LÝ CHI TIÊU*\n\n"
-                           "🤖 Bot hỗ trợ:\n\n"
-                           "*💎 ĐẦU TƯ COIN:*\n"
-                           "• Xem giá coin\n• Top 10 coin\n• Quản lý danh mục\n• Tính lợi nhuận\n• Cảnh báo giá\n\n"
-                           "*💰 QUẢN LÝ CHI TIÊU:*\n"
-                           "• Ghi chép thu/chi\n• Đa tiền tệ\n• Quản lý ngân sách\n• Báo cáo ngày/tháng/năm\n\n"
-                           f"🕐 *Hiện tại:* `{format_vn_time()}`\n\n"
-                           "👇 *Chọn chức năng bên dưới*")
-            await update.message.reply_text(welcome_msg, parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_keyboard())
+            if lang == 'ZH':
+                welcome_msg = ("🚀 *加密货币与支出管理机器人*\n\n"
+                               "🤖 机器人支持:\n\n"
+                               "*💎 加密货币投资:*\n"
+                               "• 查看价格\n• 前10加密货币\n• 投资组合管理\n• 利润计算\n• 价格提醒\n\n"
+                               "*💰 支出管理:*\n"
+                               "• 记录收入/支出\n• 多币种支持\n• 预算管理\n• 日报/月报/年报\n\n"
+                               f"🕐 *当前时间:* `{format_vn_time()}`\n\n"
+                               "👇 *请选择功能*")
+            else:
+                welcome_msg = ("🚀 *ĐẦU TƯ COIN & QUẢN LÝ CHI TIÊU*\n\n"
+                               "🤖 Bot hỗ trợ:\n\n"
+                               "*💎 ĐẦU TƯ COIN:*\n"
+                               "• Xem giá coin\n• Top 10 coin\n• Quản lý danh mục\n• Tính lợi nhuận\n• Cảnh báo giá\n\n"
+                               "*💰 QUẢN LÝ CHI TIÊU:*\n"
+                               "• Ghi chép thu/chi\n• Đa tiền tệ\n• Quản lý ngân sách\n• Báo cáo ngày/tháng/năm\n\n"
+                               f"🕐 *Hiện tại:* `{format_vn_time()}`\n\n"
+                               "👇 *Chọn chức năng bên dưới*")
+            await update.message.reply_text(welcome_msg, parse_mode=ParseMode.MARKDOWN, reply_markup=get_main_keyboard(user_id))
 
     @auto_update_user
     async def menu_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -2825,6 +2947,37 @@ try:
     async def hide_keyboard(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Đã ẩn bàn phím. Gõ /menu để hiện lại.", reply_markup=ReplyKeyboardRemove())
 
+    @auto_update_user
+    async def lang_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Chọn ngôn ngữ: /lang [vi/zh]"""
+        user_id = update.effective_user.id
+        
+        if not ctx.args:
+            # Hiển thị menu chọn ngôn ngữ
+            keyboard = [
+                [InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="lang_vi")],
+                [InlineKeyboardButton("🇨🇳 中文", callback_data="lang_zh")],
+            ]
+            
+            current = "Tiếng Việt" if get_lang(user_id) == 'VI' else "中文"
+            msg = (f"🌐 *CHỌN NGÔN NGỮ*\n━━━━━━━━━━━━━━━━\n\n"
+                   f"Hiện tại: {current}\n\n"
+                   f"Vui lòng chọn ngôn ngữ:")
+            
+            await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, 
+                                           reply_markup=InlineKeyboardMarkup(keyboard))
+            return
+        
+        lang = ctx.args[0].lower()
+        if lang in ['vi', 'vietnamese']:
+            LANGUAGE[user_id] = 'VI'
+            await update.message.reply_text("✅ Đã chuyển sang Tiếng Việt!")
+        elif lang in ['zh', 'chinese', 'cn']:
+            LANGUAGE[user_id] = 'ZH'
+            await update.message.reply_text("✅ 已切换到中文！")
+        else:
+            await update.message.reply_text("❌ Ngôn ngữ không hỗ trợ! /lang vi hoặc /lang zh")
+        
     @auto_update_user
     async def help_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
@@ -2857,6 +3010,36 @@ try:
         
         await update.message.reply_text(help_msg, parse_mode=ParseMode.MARKDOWN)
 
+    @auto_update_user
+async def lang_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Chọn ngôn ngữ: /lang [vi/zh]"""
+    user_id = update.effective_user.id
+    
+    if not ctx.args:
+        # Hiển thị menu chọn ngôn ngữ
+        keyboard = [
+            [InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="lang_vi")],
+            [InlineKeyboardButton("🇨🇳 中文", callback_data="lang_zh")],
+        ]
+        
+        current = "Tiếng Việt" if get_lang(user_id) == 'VI' else "中文"
+        msg = (f"🌐 *CHỌN NGÔN NGỮ*\n━━━━━━━━━━━━━━━━\n\n"
+               f"Hiện tại: {current}\n\n"
+               f"Vui lòng chọn ngôn ngữ:")
+        
+        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, 
+                                       reply_markup=InlineKeyboardMarkup(keyboard))
+        return
+    
+    lang = ctx.args[0].lower()
+    if lang in ['vi', 'vietnamese']:
+        LANGUAGE[user_id] = 'VI'
+        await update.message.reply_text("✅ Đã chuyển sang Tiếng Việt!")
+    elif lang in ['zh', 'chinese', 'cn']:
+        LANGUAGE[user_id] = 'ZH'
+        await update.message.reply_text("✅ 已切换到中文！")
+    else:
+        await update.message.reply_text("❌ Ngôn ngữ không hỗ trợ! /lang vi hoặc /lang zh")
     @auto_update_user
     @require_permission('view')
     async def usdt_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -8228,29 +8411,67 @@ try:
                 keyboard = [[InlineKeyboardButton("🔙 Về cài đặt", callback_data="back_to_settings")]]
                 await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
                 return
-            
-            elif data == "back_to_settings":
-                keyboard = [
-                    [InlineKeyboardButton("👥 QUẢN LÝ THÀNH VIÊN", callback_data="settings_members")],
-                    [InlineKeyboardButton("🔐 HƯỚNG DẪN QUYỀN", callback_data="settings_permissions")],
-                    [InlineKeyboardButton("📋 DANH SÁCH QUYỀN", callback_data="settings_list")],
-                    [InlineKeyboardButton("🔄 ĐỒNG BỘ ADMIN", callback_data="settings_sync")],
-                    [InlineKeyboardButton("🔙 VỀ MENU CHÍNH", callback_data="back_to_main")]
-                ]
+
+                        elif data.startswith("lang_"):
+                lang = data.replace("lang_", "")
+                user_id = query.from_user.id
                 
-                msg = (
-                    "⚙️ *CÀI ĐẶT NHÓM*\n"
-                    "━━━━━━━━━━━━━━━━\n\n"
-                    "👥 *Quản lý thành viên*\n"
-                    "• Xem danh sách và phân quyền\n\n"
-                    "🔐 *Hướng dẫn quyền*\n"
-                    "• Giải thích các mức quyền\n\n"
-                    "📋 *Danh sách quyền*\n"
-                    "• Xem quyền hiện tại của mọi người\n\n"
-                    "🔄 *Đồng bộ admin*\n"
-                    "• Tự động cấp quyền cho admin Telegram\n\n"
-                    f"🕐 {format_vn_time()}"
+                if lang == 'vi':
+                    LANGUAGE[user_id] = 'VI'
+                    msg = "✅ Đã chuyển sang Tiếng Việt!"
+                elif lang == 'zh':
+                    LANGUAGE[user_id] = 'ZH'
+                    msg = "✅ 已切换到中文！"
+                
+                await safe_edit_message(query, msg)
+                
+                # Quay về menu chính
+                await query.message.reply_text(
+                    "👇 Chọn chức năng:" if get_lang(user_id) == 'VI' else "👇 选择功能:",
+                    reply_markup=get_main_keyboard(user_id)
                 )
+                return
+                
+            elif data == "lang_menu":
+                user_id = query.from_user.id
+                keyboard = [
+                    [InlineKeyboardButton("🇻🇳 Tiếng Việt", callback_data="lang_vi")],
+                    [InlineKeyboardButton("🇨🇳 中文", callback_data="lang_zh")],
+                    [InlineKeyboardButton("🔙 Quay lại", callback_data="back_to_settings")]
+                ]
+                msg = "🌐 *CHỌN NGÔN NGỮ*\n━━━━━━━━━━━━━━━━\n\nVui lòng chọn ngôn ngữ:"
+                await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                return
+        
+            elif data == "back_to_settings":
+                lang = get_lang(query.from_user.id)
+                
+                if lang == 'ZH':
+                    keyboard = [
+                        [InlineKeyboardButton("👥 成员管理", callback_data="settings_members")],
+                        [InlineKeyboardButton("🔐 权限说明", callback_data="settings_permissions")],
+                        [InlineKeyboardButton("📋 权限列表", callback_data="settings_list")],
+                        [InlineKeyboardButton("🔄 同步管理员", callback_data="settings_sync")],
+                        [InlineKeyboardButton("🌐 语言", callback_data="lang_menu")],
+                        [InlineKeyboardButton("🔙 主菜单", callback_data="back_to_main")]
+                    ]
+                    msg = ("⚙️ *群组设置*\n"
+                           "━━━━━━━━━━━━━━━━\n\n"
+                           "请选择管理功能:\n\n"
+                           f"🕐 {format_vn_time()}")
+                else:
+                    keyboard = [
+                        [InlineKeyboardButton("👥 QUẢN LÝ THÀNH VIÊN", callback_data="settings_members")],
+                        [InlineKeyboardButton("🔐 HƯỚNG DẪN QUYỀN", callback_data="settings_permissions")],
+                        [InlineKeyboardButton("📋 DANH SÁCH QUYỀN", callback_data="settings_list")],
+                        [InlineKeyboardButton("🔄 ĐỒNG BỘ ADMIN", callback_data="settings_sync")],
+                        [InlineKeyboardButton("🌐 NGÔN NGỮ", callback_data="lang_menu")],
+                        [InlineKeyboardButton("🔙 VỀ MENU CHÍNH", callback_data="back_to_main")]
+                    ]
+                    msg = ("⚙️ *CÀI ĐẶT NHÓM*\n"
+                           "━━━━━━━━━━━━━━━━\n\n"
+                           "Chọn chức năng quản lý:\n\n"
+                           f"🕐 {format_vn_time()}")
                 
                 await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
                 return
@@ -8935,6 +9156,7 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
             app.add_handler(CommandHandler("grant", grant_command))
             app.add_handler(CommandHandler("myperm", myperm_command))
             app.add_handler(CommandHandler("export", export_master_command))
+            app.add_handler(CommandHandler("lang", lang_command))
             app.add_handler(CommandHandler("export_secure", export_secure_command))
             app.add_handler(CommandHandler("export_expense", export_expense_command))
             app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_chat_members))
