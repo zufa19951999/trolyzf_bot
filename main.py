@@ -407,24 +407,30 @@ def require_permission(permission_type):
             if chat_type == 'private':
                 return await func(update, context, *args, **kwargs)
             
-            # TRONG GROUP: Kiểm tra quyền nghiêm ngặt
+            # TRONG GROUP: Kiểm tra quyền
             if chat_type in ['group', 'supergroup']:
-                # Kiểm tra xem user có được cấp quyền không
+                # ===== QUAN TRỌNG: LỆNH /s KHÔNG CẦN QUYỀN =====
+                # Kiểm tra tên hàm hoặc lệnh đang gọi
+                func_name = func.__name__
+                
+                # Nếu là lệnh s_command (xem giá) - cho phép KHÔNG CẦN QUYỀN
+                if func_name == 's_command':
+                    return await func(update, context, *args, **kwargs)
+                # ===== KẾT THÚC =====
+                
+                # Các lệnh khác - vẫn kiểm tra quyền bình thường
                 if not check_permission(chat_id, user_id, permission_type):
                     await update.message.reply_text(
-                        "❌ *KHÔNG CÓ QUYỀN SỬ DỤNG BOT TRONG NHÓM*\n\n"
-                        "Bạn chưa được cấp quyền sử dụng bot trong nhóm này.\n"
+                        "❌ *KHÔNG CÓ QUYỀN SỬ DỤNG*\n\n"
+                        "Bạn không có quyền thực hiện hành động này trong nhóm.\n"
                         "Vui lòng liên hệ chủ sở hữu nhóm để được cấp quyền.\n\n"
-                        "💡 Trong chat riêng với bot, bạn vẫn có thể sử dụng bình thường.\n\n"
                         f"🕐 {format_vn_time()}", 
                         parse_mode=ParseMode.MARKDOWN
                     )
                     return
                 
-                # Nếu có quyền, cho phép sử dụng
                 return await func(update, context, *args, **kwargs)
             
-            # Các loại chat khác (channel, v.v.)
             return await func(update, context, *args, **kwargs)
             
         return wrapper
