@@ -6962,7 +6962,7 @@ try:
                         InlineKeyboardButton("🔙 Về menu", callback_data="back_to_expense")
                     ]]
                     
-                    await (query, safe_msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                    await safe_edit_message(query, safe_msg, reply_markup=InlineKeyboardMarkup(keyboard))
                     
                 except Exception as e:
                     logger.error(f"❌ Lỗi xóa danh mục: {e}")
