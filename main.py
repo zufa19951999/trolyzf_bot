@@ -8290,15 +8290,8 @@ try:
                     query,
                     "🔐 *XUẤT BÁO CÁO MASTER*\n\n"
                     "Dùng lệnh: `/export [mật khẩu]`\n\n"
-                    "*Ví dụ:*\n"
                     "• `/export 123456` - File ZIP có mật khẩu (tự xóa sau 30s)\n"
                     "• `/export 0` - File CSV không mã hóa\n\n"
-                    "*Báo cáo bao gồm TẤT CẢ:*\n"
-                    "📊 Danh sách giao dịch chi tiết\n"
-                    "📈 Phân tích lợi nhuận từng coin\n"
-                    "📉 Top 5 coin lời nhất, lỗ nhất\n"
-                    "🔮 Dự báo kịch bản +/-30%\n"
-                    "💡 Đánh giá & khuyến nghị đầu tư\n\n"
                     f"🕐 {format_vn_time_short()}",
                     parse_mode=ParseMode.MARKDOWN,
                     reply_markup=InlineKeyboardMarkup([[
