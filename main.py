@@ -5415,12 +5415,12 @@ try:
             writer.writerow([])
             
             # =========================================
-            # 2. LẤY DỮ LIỆU
+            # 2. LẤY DỮ LIỆU THỰC TẾ
             # =========================================
             # Lấy giao dịch mua
             buy_transactions = get_transaction_detail(user_id)
             
-            # Lấy lịch sử bán
+            # Lấy lịch sử bán từ bảng sell_history
             sell_transactions = get_sell_history(user_id, 5000)  # Lấy tối đa 5000 giao dịch bán
             
             # Lấy portfolio hiện tại
@@ -5434,10 +5434,10 @@ try:
                 return csv_content
             
             # =========================================
-            # 3. DANH SÁCH GIAO DỊCH MUA CHI TIẾT
+            # 3. DANH SÁCH GIAO DỊCH MUA (ĐANG NẮM GIỮ)
             # =========================================
             writer.writerow(['='*80])
-            writer.writerow(['DANH SÁCH GIAO DỊCH MUA (ĐANG NẮM GIỮ)'])
+            writer.writerow(['DANH SÁCH GIAO DỊCH MUA - ĐANG NẮM GIỮ'])
             writer.writerow(['='*80])
             writer.writerow([
                 'ID', 'Mã coin', 'Số lượng', 'Giá mua (USD)', 
@@ -5445,9 +5445,9 @@ try:
                 'Giá trị hiện tại (USD)', 'Lợi nhuận (USD)', 'Lợi nhuận (%)', 'Thời gian nắm giữ (ngày)'
             ])
             
-            total_invest = 0
-            total_current = 0
-            all_coins = {}
+            total_invest = 0  # Tổng vốn đang nắm giữ
+            total_current = 0  # Tổng giá trị hiện tại
+            all_coins = {}  # Dict tổng hợp theo coin
             
             for tx in buy_transactions:
                 tx_id, symbol, amount, buy_price, buy_date, total_cost = tx
@@ -5476,7 +5476,7 @@ try:
                 total_invest += total_cost
                 total_current += current_value
                 
-                # Tổng hợp theo coin cho phần phân tích
+                # Tổng hợp theo coin
                 if symbol not in all_coins:
                     all_coins[symbol] = {
                         'amount': 0,
@@ -5484,11 +5484,9 @@ try:
                         'current': 0,
                         'unrealized_profit': 0,
                         'realized_profit': 0,
-                        'total_profit': 0,
                         'buy_count': 0,
                         'sell_count': 0,
-                        'buy_transactions': [],
-                        'sell_transactions': []
+                        'buy_transactions': []
                     }
                 all_coins[symbol]['amount'] += amount
                 all_coins[symbol]['invest'] += total_cost
@@ -5505,13 +5503,13 @@ try:
             writer.writerow([])
             
             # =========================================
-            # 4. DANH SÁCH GIAO DỊCH BÁN (ĐÃ CHỐT LỜI/LỖ)
+            # 4. DANH SÁCH GIAO DỊCH BÁN - LỢI NHUẬN ĐÃ CHỐT
             # =========================================
             writer.writerow(['='*80])
             writer.writerow(['DANH SÁCH GIAO DỊCH BÁN - LỢI NHUẬN ĐÃ CHỐT'])
             writer.writerow(['='*80])
             writer.writerow([
-                'ID', 'Mã coin', 'Số lượng bán', 'Giá bán (USD)', 'Giá vốn (USD)',
+                'ID', 'Mã coin', 'Số lượng bán', 'Giá bán (USD)', 'Giá vốn TB (USD)',
                 'Giá trị bán (USD)', 'Vốn gốc (USD)', 'Lợi nhuận (USD)', 
                 'Tỷ suất (%)', 'Ngày bán'
             ])
@@ -5542,13 +5540,6 @@ try:
                     if symbol in all_coins:
                         all_coins[symbol]['realized_profit'] += profit
                         all_coins[symbol]['sell_count'] += 1
-                        all_coins[symbol]['sell_transactions'].append({
-                            'id': sell_id,
-                            'amount': amount,
-                            'price': sell_price,
-                            'profit': profit,
-                            'date': sell_date
-                        })
                     else:
                         # Coin đã bán hết, không còn trong portfolio
                         all_coins[symbol] = {
@@ -5557,20 +5548,12 @@ try:
                             'current': 0,
                             'unrealized_profit': 0,
                             'realized_profit': profit,
-                            'total_profit': profit,
                             'buy_count': 0,
                             'sell_count': 1,
-                            'buy_transactions': [],
-                            'sell_transactions': [{
-                                'id': sell_id,
-                                'amount': amount,
-                                'price': sell_price,
-                                'profit': profit,
-                                'date': sell_date
-                            }]
+                            'buy_transactions': []
                         }
             else:
-                writer.writerow(['Chưa có dữ liệu bán'])
+                writer.writerow(['CHƯA CÓ GIAO DỊCH BÁN NÀO'])
             
             writer.writerow([])
             
@@ -5584,46 +5567,47 @@ try:
             total_unrealized_profit = total_current - total_invest
             total_unrealized_pct = (total_unrealized_profit / total_invest * 100) if total_invest > 0 else 0
             total_overall_profit = total_realized_profit + total_unrealized_profit
-            total_overall_pct = (total_overall_profit / (total_invest + total_sold_cost) * 100) if (total_invest + total_sold_cost) > 0 else 0
+            total_capital = total_invest + total_sold_cost  # Tổng vốn đã đầu tư (cả đã bán và đang giữ)
+            total_overall_pct = (total_overall_profit / total_capital * 100) if total_capital > 0 else 0
             
-            writer.writerow(['TỔNG VỐN ĐẦU TƯ (ĐANG NẮM GIỮ):', f"${total_invest:,.2f}"])
-            writer.writerow(['TỔNG GIÁ TRỊ HIỆN TẠI:', f"${total_current:,.2f}"])
-            writer.writerow(['LỢI NHUẬN CHƯA CHỐT:', f"${total_unrealized_profit:,.2f}"])
-            writer.writerow(['TỶ SUẤT CHƯA CHỐT:', f"{total_unrealized_pct:+.2f}%"])
+            writer.writerow(['A. VỐN ĐANG ĐẦU TƯ (ĐANG NẮM GIỮ):'])
+            writer.writerow([f'   • Tổng vốn đang nắm giữ: ${total_invest:,.2f}'])
+            writer.writerow([f'   • Tổng giá trị hiện tại: ${total_current:,.2f}'])
+            writer.writerow([f'   • Lợi nhuận chưa chốt: ${total_unrealized_profit:,.2f}'])
+            writer.writerow([f'   • Tỷ suất chưa chốt: {total_unrealized_pct:+.2f}%'])
             writer.writerow([])
             
-            writer.writerow(['TỔNG VỐN ĐÃ BÁN:', f"${total_sold_cost:,.2f}"])
-            writer.writerow(['TỔNG GIÁ TRỊ ĐÃ BÁN:', f"${total_sold_value:,.2f}"])
-            writer.writerow(['LỢI NHUẬN ĐÃ CHỐT:', f"${total_realized_profit:,.2f}"])
+            writer.writerow(['B. LỢI NHUẬN ĐÃ CHỐT (ĐÃ BÁN):'])
+            writer.writerow([f'   • Tổng vốn đã bán: ${total_sold_cost:,.2f}'])
+            writer.writerow([f'   • Tổng giá trị đã bán: ${total_sold_value:,.2f}'])
+            writer.writerow([f'   • Lợi nhuận đã chốt: ${total_realized_profit:,.2f}'])
             writer.writerow([])
             
             writer.writerow(['='*40])
-            writer.writerow(['TỔNG LỢI NHUẬN (ĐÃ CHỐT + CHƯA CHỐT):', f"${total_overall_profit:,.2f}"])
-            writer.writerow(['TỶ SUẤT TỔNG THỂ:', f"{total_overall_pct:+.2f}%"])
+            writer.writerow(['C. TỔNG HỢP:'])
+            writer.writerow([f'   • Tổng vốn đã đầu tư: ${total_capital:,.2f}'])
+            writer.writerow([f'   • Tổng lợi nhuận (đã chốt + chưa chốt): ${total_overall_profit:,.2f}'])
+            writer.writerow([f'   • Tỷ suất lợi nhuận tổng thể: {total_overall_pct:+.2f}%'])
             writer.writerow(['='*40])
             writer.writerow([])
             
             writer.writerow(['THỐNG KÊ GIAO DỊCH:'])
-            writer.writerow(['• Tổng số giao dịch mua:', len(buy_transactions)])
-            writer.writerow(['• Tổng số giao dịch bán:', len(sell_transactions) if sell_transactions else 0])
-            writer.writerow(['• Số loại coin đã giao dịch:', len(all_coins)])
-            writer.writerow(['• Số loại coin đang nắm giữ:', len([c for c in all_coins.values() if c['amount'] > 0])])
+            writer.writerow([f'   • Tổng số giao dịch mua: {len(buy_transactions)}'])
+            writer.writerow([f'   • Tổng số giao dịch bán: {len(sell_transactions) if sell_transactions else 0}'])
+            writer.writerow([f'   • Số loại coin đã giao dịch: {len(all_coins)}'])
+            writer.writerow([f'   • Số loại coin đang nắm giữ: {len([c for c in all_coins.values() if c["amount"] > 0])}'])
             writer.writerow([])
             
             # =========================================
             # 6. PHÂN TÍCH THEO TỪNG COIN
             # =========================================
             writer.writerow(['='*80])
-            writer.writerow(['PHÂN TÍCH THEO TỪNG COIN'])
+            writer.writerow(['PHÂN TÍCH CHI TIẾT THEO TỪNG COIN'])
             writer.writerow(['='*80])
             writer.writerow([
                 'Mã coin', 'Số lượng nắm giữ', 'Vốn đang nắm', 'Giá trị hiện tại',
-                'Lợi nhuận chưa chốt', 'Lợi nhuận đã chốt', 'Tổng lợi nhuận',
-                'Số lần mua', 'Số lần bán', 'Tỷ trọng'
+                'LN chưa chốt', 'LN đã chốt', 'Tổng LN', 'Số lần mua', 'Số lần bán', 'Tỷ trọng vốn'
             ])
-            
-            # Tính tổng vốn + tổng bán để tính tỷ trọng
-            total_capital = total_invest + total_sold_cost
             
             for symbol, data in all_coins.items():
                 total_profit_coin = data['unrealized_profit'] + data['realized_profit']
@@ -5645,30 +5629,46 @@ try:
             writer.writerow([])
             
             # =========================================
-            # 7. CHI TIẾT GIAO DỊCH BÁN THEO COIN
+            # 7. CHI TIẾT LỢI NHUẬN ĐÃ CHỐT THEO COIN
             # =========================================
             if sell_transactions:
                 writer.writerow(['='*80])
-                writer.writerow(['CHI TIẾT GIAO DỊCH BÁN THEO COIN'])
+                writer.writerow(['CHI TIẾT LỢI NHUẬN ĐÃ CHỐT THEO TỪNG COIN'])
                 writer.writerow(['='*80])
                 
-                for symbol, data in all_coins.items():
-                    if data['sell_transactions']:
-                        writer.writerow([f'COIN: {symbol} - Tổng lợi nhuận đã chốt: ${data["realized_profit"]:,.2f}'])
-                        writer.writerow(['ID', 'Số lượng', 'Giá bán', 'Giá vốn', 'Lợi nhuận', 'Tỷ suất', 'Ngày bán'])
+                # Lấy danh sách coin có lợi nhuận đã chốt
+                coins_with_realized = [(s, d) for s, d in all_coins.items() if d['realized_profit'] != 0]
+                
+                if coins_with_realized:
+                    for symbol, data in coins_with_realized:
+                        writer.writerow([f'📌 {symbol}: Tổng lợi nhuận đã chốt = ${data["realized_profit"]:,.2f}'])
                         
-                        for sell in data['sell_transactions']:
-                            profit_pct = ((sell['price'] - data['invest']/data['amount'] if data['amount'] > 0 else 0) / (data['invest']/data['amount'] if data['amount'] > 0 else 1)) * 100
-                            writer.writerow([
-                                sell['id'],
-                                f"{sell['amount']:.8f}",
-                                f"${sell['price']:,.2f}",
-                                f"${sell['amount'] * (data['invest']/data['amount'] if data['amount'] > 0 else 0):,.2f}",
-                                f"${sell['profit']:,.2f}",
-                                f"{(sell['profit']/(sell['amount'] * (data['invest']/data['amount'] if data['amount'] > 0 else 1))*100):+.2f}%",
-                                sell['date']
-                            ])
+                        # Lấy chi tiết các giao dịch bán của coin này
+                        conn = sqlite3.connect(DB_PATH)
+                        c = conn.cursor()
+                        c.execute('''SELECT id, amount, sell_price, buy_price, profit, profit_percent, sell_date 
+                                    FROM sell_history 
+                                    WHERE user_id = ? AND symbol = ? 
+                                    ORDER BY sell_date DESC''', (user_id, symbol))
+                        coin_sells = c.fetchall()
+                        conn.close()
+                        
+                        if coin_sells:
+                            writer.writerow(['   ID', 'Số lượng', 'Giá bán', 'Giá vốn', 'Lợi nhuận', 'Tỷ suất', 'Ngày bán'])
+                            for sell in coin_sells:
+                                s_id, s_amount, s_price, s_buy_price, s_profit, s_profit_pct, s_date = sell
+                                writer.writerow([
+                                    f'   {s_id}',
+                                    f'{s_amount:.8f}',
+                                    f'${s_price:,.2f}',
+                                    f'${s_buy_price:,.2f}',
+                                    f'${s_profit:,.2f}',
+                                    f'{s_profit_pct:+.2f}%',
+                                    s_date
+                                ])
                         writer.writerow([])
+                else:
+                    writer.writerow(['Chưa có lợi nhuận đã chốt từ bán coin'])
             
             # =========================================
             # 8. TOP COIN THEO LỢI NHUẬN
@@ -5680,7 +5680,7 @@ try:
             # Sắp xếp coin theo tổng lợi nhuận
             sorted_coins = sorted(all_coins.items(), key=lambda x: x[1]['unrealized_profit'] + x[1]['realized_profit'], reverse=True)
             
-            writer.writerow(['TOP 5 COIN LỜI NHẤT (TỔNG LỢI NHUẬN)'])
+            writer.writerow(['🏆 TOP 5 COIN LỜI NHẤT (TỔNG LỢI NHUẬN)'])
             writer.writerow(['Mã coin', 'Lợi nhuận chưa chốt', 'Lợi nhuận đã chốt', 'Tổng lợi nhuận', 'Tỷ suất TB'])
             
             count = 0
@@ -5688,7 +5688,7 @@ try:
                 total_profit = data['unrealized_profit'] + data['realized_profit']
                 if total_profit > 0:
                     count += 1
-                    total_invest_coin = data['invest'] + (data['realized_profit'] / (1 + (data['realized_profit']/data['invest'] if data['invest'] > 0 else 1)) if data['realized_profit'] > 0 else 0)
+                    total_invest_coin = data['invest'] + abs(data['realized_profit'])
                     avg_return = (total_profit / total_invest_coin * 100) if total_invest_coin > 0 else 0
                     writer.writerow([
                         symbol,
@@ -5704,7 +5704,7 @@ try:
                 writer.writerow(['Không có coin lời'])
             
             writer.writerow([])
-            writer.writerow(['TOP 5 COIN LỖ NHẤT (TỔNG LỢI NHUẬN)'])
+            writer.writerow(['📉 TOP 5 COIN LỖ NHẤT (TỔNG LỢI NHUẬN)'])
             writer.writerow(['Mã coin', 'Lỗ chưa chốt', 'Lỗ đã chốt', 'Tổng lỗ', 'Tỷ suất TB'])
             
             count = 0
@@ -5764,7 +5764,7 @@ try:
             writer.writerow(['ĐÁNH GIÁ & KHUYẾN NGHỊ'])
             writer.writerow(['='*80])
             
-            # Đánh giá tổng quan dựa trên tổng lợi nhuận
+            # Đánh giá dựa trên tổng lợi nhuận
             if total_overall_profit > 0:
                 if total_overall_profit > total_capital * 0.5:
                     rating = "🚀 XUẤT SẮC - Tổng lợi nhuận >50%"
@@ -5783,51 +5783,51 @@ try:
             writer.writerow(['Đánh giá tổng quan:', rating])
             writer.writerow([])
             
-            writer.writerow(['PHÂN TÍCH LỢI NHUẬN:'])
-            writer.writerow([f'• Lợi nhuận đã chốt: ${total_realized_profit:,.2f}'])
-            writer.writerow([f'• Lợi nhuận chưa chốt: ${total_unrealized_profit:,.2f}'])
-            writer.writerow([f'• Tổng lợi nhuận: ${total_overall_profit:,.2f}'])
-            writer.writerow([f'• Tỷ suất tổng thể: {total_overall_pct:+.2f}%'])
+            writer.writerow(['📊 PHÂN TÍCH LỢI NHUẬN:'])
+            writer.writerow([f'   • Lợi nhuận đã chốt (thực tế): ${total_realized_profit:,.2f}'])
+            writer.writerow([f'   • Lợi nhuận chưa chốt (trên giấy): ${total_unrealized_profit:,.2f}'])
+            writer.writerow([f'   • Tổng lợi nhuận: ${total_overall_profit:,.2f}'])
+            writer.writerow([f'   • Tỷ suất lợi nhuận tổng thể: {total_overall_pct:+.2f}%'])
             writer.writerow([])
             
             # Khuyến nghị chi tiết
-            writer.writerow(['KHUYẾN NGHỊ:'])
+            writer.writerow(['💡 KHUYẾN NGHỊ:'])
             
-            # Dựa trên lợi nhuận đã chốt
+            # Đánh giá về lợi nhuận đã chốt
             if total_realized_profit > 0:
-                writer.writerow([f'✅ Bạn đã chốt lời thành công ${total_realized_profit:,.2f} - Tốt!'])
+                writer.writerow([f'   ✅ Bạn đã chốt lời thành công ${total_realized_profit:,.2f} - Rất tốt!'])
             else:
-                writer.writerow(['⚠️ Chưa có lợi nhuận đã chốt - Cân nhắc chốt lời một phần khi thị trường tăng'])
+                writer.writerow(['   ⚠️ Bạn chưa chốt lời lần nào - Cân nhắc chốt lời một phần khi thị trường tăng'])
             
             # Top coin lời nhất (chưa chốt)
             profitable_coins = [(s, d) for s, d in all_coins.items() if d['amount'] > 0 and d['unrealized_profit'] > 0]
             if profitable_coins:
                 best_coin = max(profitable_coins, key=lambda x: x[1]['unrealized_profit'])
                 profit = best_coin[1]['unrealized_profit']
-                writer.writerow([f'💰 {best_coin[0]} đang lời nhiều nhất: ${profit:,.2f} - Có thể chốt lời một phần'])
+                writer.writerow([f'   💰 {best_coin[0]} đang lời nhiều nhất: ${profit:,.2f} - Có thể chốt lời một phần'])
             
             # Top coin lỗ nhất (chưa chốt)
             losing_coins = [(s, d) for s, d in all_coins.items() if d['amount'] > 0 and d['unrealized_profit'] < 0]
             if losing_coins:
                 worst_coin = min(losing_coins, key=lambda x: x[1]['unrealized_profit'])
                 loss = abs(worst_coin[1]['unrealized_profit'])
-                writer.writerow([f'⚠️ {worst_coin[0]} đang lỗ nhiều nhất: ${loss:,.2f} - Cân nhắc cắt lỗ hoặc đợi hồi'])
+                writer.writerow([f'   ⚠️ {worst_coin[0]} đang lỗ nhiều nhất: ${loss:,.2f} - Cân nhắc cắt lỗ hoặc đợi hồi'])
             
             # Đa dạng hóa
             active_coins = len([s for s, d in all_coins.items() if d['amount'] > 0])
             if active_coins < 3:
-                writer.writerow([f'📌 Danh mục chưa đa dạng (chỉ {active_coins} coin) - Nên đầu tư thêm'])
+                writer.writerow([f'   📌 Danh mục chưa đa dạng (chỉ {active_coins} coin) - Nên đầu tư thêm'])
             elif active_coins > 10:
-                writer.writerow([f'📌 Danh mục khá đa dạng ({active_coins} coin) - Theo dõi sát các coin nhỏ'])
+                writer.writerow([f'   📌 Danh mục khá đa dạng ({active_coins} coin) - Theo dõi sát các coin nhỏ'])
             
             # Tỷ trọng lớn
             for symbol, data in all_coins.items():
                 if data['amount'] > 0:
                     weight = (data['current'] / total_current * 100) if total_current > 0 else 0
                     if weight > 50:
-                        writer.writerow([f'⚠️ {symbol} chiếm {weight:.1f}% danh mục - Rủi ro tập trung cao'])
+                        writer.writerow([f'   ⚠️ {symbol} chiếm {weight:.1f}% danh mục - Rủi ro tập trung cao'])
                     elif weight > 30:
-                        writer.writerow([f'📊 {symbol} chiếm {weight:.1f}% danh mục - Tỷ trọng khá lớn'])
+                        writer.writerow([f'   📊 {symbol} chiếm {weight:.1f}% danh mục - Tỷ trọng khá lớn'])
             
             writer.writerow([])
             writer.writerow(['='*80])
