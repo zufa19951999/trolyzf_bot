@@ -321,6 +321,52 @@ class UsernameCache:
 
 username_cache = UsernameCache()
 
+# ==================== THÊM HÀM NÀY VÀO ĐÂY ====================
+
+def get_user_id_by_username(username):
+    """Lấy user_id từ username, ưu tiên cache trước, sau đó database"""
+    try:
+        clean_username = username.lower().replace('@', '').strip()
+        
+        # Kiểm tra cache trước
+        cached_id = username_cache.get(clean_username)
+        if cached_id:
+            logger.info(f"✅ Cache hit for @{clean_username}: {cached_id}")
+            return cached_id
+        
+        # Nếu không có trong cache, tìm trong database
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        
+        # Tìm chính xác username
+        c.execute("SELECT user_id FROM users WHERE username = ?", (clean_username,))
+        result = c.fetchone()
+        
+        if result:
+            user_id = result[0]
+            username_cache.set(clean_username, user_id)
+            conn.close()
+            return user_id
+        
+        # Nếu không tìm thấy chính xác, thử tìm gần đúng (cho trường hợp username lưu thiếu @)
+        c.execute("SELECT user_id, username FROM users WHERE username LIKE ?", (f"%{clean_username}%",))
+        results = c.fetchall()
+        
+        if results:
+            # Lấy kết quả đầu tiên
+            user_id = results[0][0]
+            username_cache.set(clean_username, user_id)
+            logger.info(f"✅ Found {len(results)} users matching '{username}', using first: {user_id}")
+            conn.close()
+            return user_id
+        
+        conn.close()
+        return None
+        
+    except Exception as e:
+        logger.error(f"❌ Lỗi get_user_id_by_username({username}): {e}")
+        return None
+
 # ==================== RENDER CONFIGURATION ====================
 class RenderConfig:
     def __init__(self):
@@ -3128,84 +3174,259 @@ try:
             target_user_id = ctx.bot_data.get('effective_user_id', current_user_id)
             logger.info(f"👥 GROUP: bán coin cho owner {target_user_id}")
         
-        if len(ctx.args) < 2:
-            return await update.message.reply_text("❌ /sell btc 0.2")
+        # Hiển thị hướng dẫn nếu không có tham số
+        if len(ctx.args) < 1:
+            keyboard = [[InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")]]
+            msg = (
+                "📝 *HƯỚNG DẪN BÁN COIN*\n"
+                "━━━━━━━━━━━━━━━━\n\n"
+                "*Cách 1: Bán theo số lượng (giá thị trường)*\n"
+                "`/sell [coin] [số lượng]`\n"
+                "📌 Ví dụ: `/sell btc 0.5`\n\n"
+                "*Cách 2: Bán theo số lượng với giá chỉ định*\n"
+                "`/sell [coin] [số lượng] [giá bán]`\n"
+                "📌 Ví dụ: `/sell btc 0.5 45000`\n\n"
+                "*Cách 3: Bán toàn bộ*\n"
+                "`/sell [coin] all`\n"
+                "📌 Ví dụ: `/sell btc all`\n\n"
+                "*Cách 4: Bán theo giá trị USD*\n"
+                "`/sell [coin] $[giá trị]`\n"
+                "📌 Ví dụ: `/sell btc $1000`\n\n"
+                f"🕐 {format_vn_time_short()}"
+            )
+            await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
+            return
         
         symbol = ctx.args[0].upper()
         
-        try:
-            sell_amount = float(ctx.args[1])
-        except ValueError:
-            return await update.message.reply_text("❌ Số lượng không hợp lệ!")
-        
-        if sell_amount <= 0:
-            return await update.message.reply_text("❌ Số lượng phải > 0")
-        
-        portfolio_data = get_portfolio(target_user_id)
-        if not portfolio_data:
-            return await update.message.reply_text("📭 Danh mục trống!")
-        
-        portfolio = []
-        for row in portfolio_data:
-            portfolio.append({'symbol': row[0], 'amount': row[1], 'buy_price': row[2], 'buy_date': row[3], 'total_cost': row[4]})
-        
-        symbol_txs = [tx for tx in portfolio if tx['symbol'] == symbol]
-        if not symbol_txs:
-            return await update.message.reply_text(f"❌ Không có *{symbol}*", parse_mode='Markdown')
-        
-        total_amount = sum(tx['amount'] for tx in symbol_txs)
-        if sell_amount > total_amount:
-            return await update.message.reply_text(f"❌ Chỉ có {total_amount:.4f} {symbol}")
-        
+        # Kiểm tra coin có tồn tại không
         price_data = get_price(symbol)
         if not price_data:
-            return await update.message.reply_text(f"❌ Không thể lấy giá *{symbol}*", parse_mode='Markdown')
+            await update.message.reply_text(f"❌ Không thể lấy giá *{symbol}*", parse_mode='Markdown')
+            return
         
         current_price = price_data['p']
         
+        # Lấy portfolio
+        portfolio_data = get_portfolio(target_user_id)
+        if not portfolio_data:
+            await update.message.reply_text("📭 Danh mục trống!")
+            return
+        
+        # Chuyển đổi portfolio thành list dict
+        portfolio = []
+        for row in portfolio_data:
+            portfolio.append({
+                'symbol': row[0], 
+                'amount': row[1], 
+                'buy_price': row[2], 
+                'buy_date': row[3], 
+                'total_cost': row[4]
+            })
+        
+        # Lọc các giao dịch của coin cần bán
+        symbol_txs = [tx for tx in portfolio if tx['symbol'] == symbol]
+        if not symbol_txs:
+            await update.message.reply_text(f"❌ Không có *{symbol}* trong danh mục", parse_mode='Markdown')
+            return
+        
+        total_amount = sum(tx['amount'] for tx in symbol_txs)
+        
+        # Xác định số lượng cần bán
+        sell_amount = 0
+        sell_price = current_price  # Mặc định là giá thị trường
+        
+        # Xử lý tham số
+        if len(ctx.args) >= 2:
+            amount_arg = ctx.args[1].lower()
+            
+            # Kiểm tra nếu là "all" - bán toàn bộ
+            if amount_arg == 'all':
+                sell_amount = total_amount
+            
+            # Kiểm tra nếu bán theo giá trị USD (có dấu $)
+            elif amount_arg.startswith('$'):
+                try:
+                    usd_value = float(amount_arg[1:].replace(',', ''))
+                    sell_amount = usd_value / current_price
+                    if sell_amount > total_amount:
+                        await update.message.reply_text(f"❌ Giá trị ${usd_value:,.2f} tương đương {sell_amount:.4f} {symbol}\n📊 Bạn chỉ có {total_amount:.4f} {symbol}")
+                        return
+                except ValueError:
+                    await update.message.reply_text("❌ Giá trị USD không hợp lệ!")
+                    return
+            
+            # Bán theo số lượng
+            else:
+                try:
+                    sell_amount = float(amount_arg)
+                except ValueError:
+                    await update.message.reply_text("❌ Số lượng không hợp lệ!")
+                    return
+        
+        # Nếu có tham số giá bán
+        if len(ctx.args) >= 3:
+            try:
+                sell_price = float(ctx.args[2])
+                if sell_price <= 0:
+                    await update.message.reply_text("❌ Giá bán phải > 0!")
+                    return
+                
+                # Cảnh báo nếu giá bán khác xa giá thị trường
+                price_diff_percent = ((sell_price - current_price) / current_price) * 100
+                if abs(price_diff_percent) > 10:
+                    warning_msg = await update.message.reply_text(
+                        f"⚠️ *CẢNH BÁO*\nGiá bán của bạn ({fmt_price(sell_price)}) "
+                        f"{'cao hơn' if price_diff_percent > 0 else 'thấp hơn'} "
+                        f"{abs(price_diff_percent):.1f}% so với giá thị trường ({fmt_price(current_price)})!\n\n"
+                        f"Bạn có chắc muốn bán ở mức giá này?",
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                    # Xóa cảnh báo sau 10 giây
+                    asyncio.create_task(auto_delete_message(ctx, update.effective_chat.id, warning_msg.message_id, 10))
+            except ValueError:
+                await update.message.reply_text("❌ Giá bán không hợp lệ!")
+                return
+        
+        # Kiểm tra số lượng bán
+        if sell_amount <= 0:
+            await update.message.reply_text("❌ Số lượng phải > 0")
+            return
+        
+        if sell_amount > total_amount:
+            await update.message.reply_text(f"❌ Bạn chỉ có {total_amount:.4f} {symbol}")
+            return
+        
+        # Xác nhận trước khi bán (nếu bán số lượng lớn > 10% portfolio)
+        if sell_amount > total_amount * 0.1 and len(ctx.args) < 3:
+            keyboard = [[
+                InlineKeyboardButton("✅ Xác nhận", callback_data=f"confirm_sell_{symbol}_{sell_amount}_{sell_price}"),
+                InlineKeyboardButton("❌ Hủy", callback_data="cancel_sell")
+            ]]
+            
+            msg = (
+                f"⚠️ *XÁC NHẬN BÁN {symbol}*\n"
+                f"━━━━━━━━━━━━━━━━\n\n"
+                f"📊 Số lượng: `{sell_amount:.4f}`\n"
+                f"💰 Giá bán: `{fmt_price(sell_price)}`\n"
+                f"💵 Tổng giá trị: `{fmt_price(sell_amount * sell_price)}`\n"
+                f"📈 Giá thị trường: `{fmt_price(current_price)}`\n"
+                f"📊 Tỷ lệ trong portfolio: `{(sell_amount/total_amount*100):.1f}%`\n\n"
+                f"Bạn có chắc muốn bán?"
+            )
+            
+            await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
+            return
+        
+        # Thực hiện bán
+        await execute_sell(update, ctx, target_user_id, symbol, sell_amount, sell_price, current_price, portfolio, current_user_id)
+
+    async def execute_sell(update, ctx, target_user_id, symbol, sell_amount, sell_price, current_price, portfolio, current_user_id):
+        """Thực thi lệnh bán coin"""
         remaining_sell = sell_amount
         new_portfolio = []
         sold_value = 0
         sold_cost = 0
+        sold_transactions = []
+        
+        # Sắp xếp giao dịch theo FIFO (cái nào mua trước bán trước)
+        portfolio.sort(key=lambda x: x['buy_date'])
         
         for tx in portfolio:
             if tx['symbol'] == symbol and remaining_sell > 0:
                 if tx['amount'] <= remaining_sell:
+                    # Bán toàn bộ giao dịch này
                     sold_cost += tx['total_cost']
-                    sold_value += tx['amount'] * current_price
+                    sold_value += tx['amount'] * sell_price
                     remaining_sell -= tx['amount']
+                    
+                    sold_transactions.append({
+                        'amount': tx['amount'],
+                        'buy_price': tx['buy_price'],
+                        'profit': (sell_price - tx['buy_price']) * tx['amount']
+                    })
                 else:
+                    # Bán một phần
                     sell_part = remaining_sell
-                    sold_cost += sell_part * tx['buy_price']
-                    sold_value += sell_part * current_price
+                    part_cost = sell_part * tx['buy_price']
+                    sold_cost += part_cost
+                    sold_value += sell_part * sell_price
+                    
+                    # Cập nhật lại giao dịch còn lại
                     tx['amount'] -= sell_part
                     tx['total_cost'] = tx['amount'] * tx['buy_price']
                     new_portfolio.append(tx)
+                    
+                    sold_transactions.append({
+                        'amount': sell_part,
+                        'buy_price': tx['buy_price'],
+                        'profit': (sell_price - tx['buy_price']) * sell_part
+                    })
+                    
                     remaining_sell = 0
             else:
                 new_portfolio.append(tx)
         
+        # Cập nhật database
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
-        c.execute("DELETE FROM portfolio WHERE user_id = ?", (owner_id,))
+        
+        # Xóa tất cả giao dịch cũ
+        c.execute("DELETE FROM portfolio WHERE user_id = ?", (target_user_id,))
+        
+        # Thêm lại các giao dịch còn lại
         for tx in new_portfolio:
-            c.execute('''INSERT INTO portfolio (user_id, symbol, amount, buy_price, buy_date, total_cost) VALUES (?, ?, ?, ?, ?, ?)''',
-                      (owner_id, tx['symbol'], tx['amount'], tx['buy_price'], tx['buy_date'], tx['total_cost']))
+            c.execute('''INSERT INTO portfolio (user_id, symbol, amount, buy_price, buy_date, total_cost) 
+                        VALUES (?, ?, ?, ?, ?, ?)''',
+                      (target_user_id, tx['symbol'], tx['amount'], tx['buy_price'], tx['buy_date'], tx['total_cost']))
+        
         conn.commit()
         conn.close()
         
+        # Tính toán lợi nhuận
         profit = sold_value - sold_cost
-        profit_percent = (profit / sold_cost) * 100 if sold_cost > 0 else 0
+        profit_percent = (profit / sold_cost * 100) if sold_cost > 0 else 0
         
+        # Thông tin người bán
         sold_by = f" (bán bởi @{update.effective_user.username})" if update.effective_user.username else ""
         
-        msg = (f"✅ *ĐÃ BÁN {sell_amount:.4f} {symbol}*{sold_by}\n━━━━━━━━━━━━━━━━\n\n"
-               f"💰 Giá bán: `{fmt_price(current_price)}`\n"
-               f"💵 Giá trị: `{fmt_price(sold_value)}`\n"
-               f"📊 Vốn: `{fmt_price(sold_cost)}`\n"
-               f"{'✅' if profit>=0 else '❌'} LN: `{fmt_price(profit)}` ({profit_percent:+.2f}%)\n\n"
-               f"🕐 {format_vn_time()}")
+        # Thông tin chủ sở hữu
+        owner_info = ""
+        if update.effective_chat.type != 'private' and target_user_id != current_user_id:
+            owner_info = f"\n📌 Dữ liệu thuộc về chủ sở hữu group"
+        
+        # Tạo message chi tiết
+        msg = (f"✅ *ĐÃ BÁN {sell_amount:.4f} {symbol}*{sold_by}\n"
+               f"━━━━━━━━━━━━━━━━\n\n"
+               f"💰 Giá bán: `{fmt_price(sell_price)}`\n"
+               f"💵 Giá trị bán: `{fmt_price(sold_value)}`\n"
+               f"📊 Vốn gốc: `{fmt_price(sold_cost)}`\n"
+               f"{'✅' if profit>=0 else '❌'} Lợi nhuận: `{fmt_price(profit)}` ({profit_percent:+.2f}%)\n")
+        
+        # Thêm chi tiết từng giao dịch nếu bán nhiều
+        if len(sold_transactions) > 1:
+            msg += f"\n*📋 CHI TIẾT GIAO DỊCH:*\n"
+            for i, tx in enumerate(sold_transactions, 1):
+                tx_profit = tx['profit']
+                tx_profit_pct = ((sell_price - tx['buy_price']) / tx['buy_price']) * 100
+                msg += f"{i}. SL: `{tx['amount']:.4f}` - Giá mua: `{fmt_price(tx['buy_price'])}`\n"
+                msg += f"   {'✅' if tx_profit>=0 else '❌'} LN: `{fmt_price(tx_profit)}` ({tx_profit_pct:+.2f}%)\n"
+        
+        # So sánh với giá thị trường
+        if abs(sell_price - current_price) > 0.01:
+            price_diff = sell_price - current_price
+            price_diff_pct = (price_diff / current_price) * 100
+            if price_diff > 0:
+                msg += f"\n📈 Bán *cao hơn* thị trường: `{fmt_price(abs(price_diff))}` ({price_diff_pct:+.2f}%)"
+            else:
+                msg += f"\n📉 Bán *thấp hơn* thị trường: `{fmt_price(abs(price_diff))}` ({price_diff_pct:+.2f}%)"
+        
+        msg += f"{owner_info}\n\n🕐 {format_vn_time()}"
+        
         await update.message.reply_text(msg, parse_mode='Markdown')
+        
+        # Ghi log giao dịch
+        logger.info(f"💰 SELL: User {target_user_id} bán {sell_amount} {symbol} @ {sell_price}, profit: {profit}")
         
     @auto_update_user
     @require_permission('edit')
@@ -9150,7 +9371,8 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
             app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_chat_members))
             app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
             app.add_handler(CallbackQueryHandler(handle_callback))
-            
+            app.add_handler(CallbackQueryHandler(handle_sell_confirmation, pattern="^(confirm_sell_|cancel_sell)"))
+
             logger.info("✅ Đã đăng ký handlers")
             
             # Khởi động thông minh
