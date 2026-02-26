@@ -3714,8 +3714,8 @@ try:
         """Xóa lịch sử bán: /delsell [id]"""
         user_id = ctx.bot_data.get('effective_user_id', update.effective_user.id)
         
+        # Nếu không có tham số, hiển thị danh sách để chọn
         if not ctx.args:
-            # Hiển thị danh sách để chọn
             sells = get_sell_history(user_id, 10)
             if not sells:
                 await update.message.reply_text("📭 Không có lịch sử bán nào để xóa!")
@@ -3727,7 +3727,8 @@ try:
             
             for sell in sells:
                 sell_id, symbol, amount, sell_price, buy_price, profit, profit_pct, sell_date, created = sell
-                msg += f"• #{sell_id} {sell_date}: {symbol} {amount:.4f} @ {fmt_price(sell_price)} ({profit_pct:+.2f}%)\n"
+                emoji = "✅" if profit >= 0 else "❌"
+                msg += f"• {emoji} #{sell_id} {sell_date}: {symbol} {amount:.4f} @ {fmt_price(sell_price)} ({profit_pct:+.2f}%)\n"
                 
                 row.append(InlineKeyboardButton(f"🗑 #{sell_id}", callback_data=f"del_sell_{sell_id}"))
                 if len(row) == 3:
@@ -3742,20 +3743,39 @@ try:
             await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
             return
         
+        # Nếu có tham số ID
         try:
             sell_id = int(ctx.args[0])
-            
-            # Hỏi xác nhận
-            keyboard = [[
-                InlineKeyboardButton("✅ Xác nhận", callback_data=f"confirm_del_sell_{sell_id}"),
-                InlineKeyboardButton("❌ Hủy", callback_data="cancel_del_sell")
-            ]]
-            
-            await update.message.reply_text(f"⚠️ *Xác nhận xóa lệnh bán #{sell_id}?*", 
-                                           parse_mode=ParseMode.MARKDOWN,
-                                           reply_markup=InlineKeyboardMarkup(keyboard))
         except ValueError:
-            await update.message.reply_text("❌ ID không hợp lệ!")
+            await update.message.reply_text("❌ ID không hợp lệ! Vui lòng nhập số.")
+            return
+        
+        # Kiểm tra lệnh bán có tồn tại không
+        sell = get_sell_detail(sell_id, user_id)
+        if not sell:
+            await update.message.reply_text(f"❌ Không tìm thấy lệnh bán #{sell_id}")
+            return
+        
+        # Hỏi xác nhận
+        id, user, symbol, amount, sell_price, buy_price, total_sold, total_cost, profit, profit_pct, sell_date, created = sell
+        emoji = "✅" if profit >= 0 else "❌"
+        
+        msg = (f"⚠️ *XÁC NHẬN XÓA LỆNH BÁN*\n━━━━━━━━━━━━━━━━\n\n"
+               f"• ID: #{sell_id}\n"
+               f"• Coin: {symbol}\n"
+               f"• Ngày bán: {sell_date}\n"
+               f"• Số lượng: {amount:.4f}\n"
+               f"• Giá bán: {fmt_price(sell_price)}\n"
+               f"• Giá vốn: {fmt_price(buy_price)}\n"
+               f"• {emoji} Lợi nhuận: {fmt_price(profit)} ({profit_pct:+.2f}%)\n\n"
+               f"Bạn có chắc chắn muốn xóa?")
+        
+        keyboard = [[
+            InlineKeyboardButton("✅ Xác nhận", callback_data=f"confirm_del_sell_{sell_id}"),
+            InlineKeyboardButton("❌ Hủy", callback_data="cancel_del_sell")
+        ]]
+        
+        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
     
     
     @auto_update_user
@@ -5395,7 +5415,7 @@ try:
         """
         try:
             import csv
-            import io
+            import io  # <-- THÊM DÒNG NÀY
             from datetime import datetime
             
             # Tạo buffer cho CSV
