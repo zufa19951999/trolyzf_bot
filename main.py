@@ -8885,7 +8885,73 @@ try:
                     await query.message.reply_text("❌ Có lỗi xảy ra.")
                 except:
                     pass
-                    
+
+    async def handle_sell_confirmation(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Xử lý xác nhận bán coin"""
+        query = update.callback_query
+        await query.answer()
+        
+        if query.data == "cancel_sell":
+            await query.edit_message_text(
+                "❌ Đã hủy lệnh bán.", 
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")
+                ]])
+            )
+            return
+        
+        if query.data.startswith("confirm_sell_"):
+            # Parse dữ liệu
+            parts = query.data.replace("confirm_sell_", "").split("_")
+            
+            if len(parts) < 3:
+                await query.edit_message_text("❌ Dữ liệu không hợp lệ!")
+                return
+                
+            symbol = parts[0]
+            try:
+                sell_amount = float(parts[1])
+                sell_price = float(parts[2])
+            except ValueError:
+                await query.edit_message_text("❌ Số liệu không hợp lệ!")
+                return
+            
+            current_user_id = query.from_user.id
+            chat_type = query.message.chat.type
+            chat_id = query.message.chat.id
+            
+            # Xác định target user
+            if chat_type == 'private':
+                target_user_id = current_user_id
+            else:
+                owner_id = get_group_owner(chat_id)
+                is_admin = check_permission(chat_id, current_user_id, 'edit')
+                target_user_id = owner_id if is_admin else current_user_id
+            
+            # Lấy portfolio
+            portfolio_data = get_portfolio(target_user_id)
+            portfolio = []
+            for row in portfolio_data:
+                portfolio.append({
+                    'symbol': row[0], 
+                    'amount': row[1], 
+                    'buy_price': row[2], 
+                    'buy_date': row[3], 
+                    'total_cost': row[4]
+                })
+            
+            # Lấy giá hiện tại
+            price_data = get_price(symbol)
+            current_price = price_data['p'] if price_data else 0
+            
+            await query.edit_message_text("🔄 Đang xử lý lệnh bán...")
+            
+            # Thực hiện bán
+            await execute_sell(
+                update, ctx, target_user_id, symbol, 
+                sell_amount, sell_price, current_price, 
+                portfolio, current_user_id
+            )
                     
     # ==================== WEBHOOK SETUP ====================
     async def setup_webhook():
