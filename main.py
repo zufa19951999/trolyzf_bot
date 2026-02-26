@@ -725,16 +725,16 @@ try:
                 c.execute("ALTER TABLE expenses ADD COLUMN currency TEXT DEFAULT 'VND'")
 
             c.execute('''CREATE TABLE IF NOT EXISTS sell_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                user_id INTEGER, 
-                symbol TEXT, 
-                amount REAL, 
-                sell_price REAL, 
-                buy_price REAL,  -- Giá vốn trung bình
-                total_sold REAL,  -- Tổng giá trị bán
-                total_cost REAL,  -- Tổng vốn gốc
-                profit REAL,      -- Lợi nhuận
-                profit_percent REAL, -- Tỷ suất lợi nhuận
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                symbol TEXT,
+                amount REAL,
+                sell_price REAL,
+                buy_price REAL,
+                total_sold REAL,
+                total_cost REAL,
+                profit REAL,
+                profit_percent REAL,
                 sell_date TEXT,
                 created_at TEXT
             )''')
@@ -1965,6 +1965,91 @@ try:
             if conn:
                 conn.close()
                 logger.info("🔚 Đã đóng kết nối database")
+
+    def get_sell_history(user_id, limit=50):
+        """Lấy lịch sử bán của user"""
+        conn = None
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute('''SELECT id, symbol, amount, sell_price, buy_price, profit, profit_percent, sell_date, created_at 
+                        FROM sell_history 
+                        WHERE user_id = ? 
+                        ORDER BY sell_date DESC, created_at DESC 
+                        LIMIT ?''', (user_id, limit))
+            return c.fetchall()
+        except Exception as e:
+            logger.error(f"❌ Lỗi lấy sell history: {e}")
+            return []
+        finally:
+            if conn:
+                conn.close()
+    
+    def get_sell_detail(sell_id, user_id):
+        """Lấy chi tiết một lệnh bán"""
+        conn = None
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute('''SELECT * FROM sell_history WHERE id = ? AND user_id = ?''', (sell_id, user_id))
+            return c.fetchone()
+        except Exception as e:
+            logger.error(f"❌ Lỗi lấy sell detail: {e}")
+            return None
+        finally:
+            if conn:
+                conn.close()
+    
+    def delete_sell_history(sell_id, user_id):
+        """Xóa lịch sử bán"""
+        conn = None
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute('''DELETE FROM sell_history WHERE id = ? AND user_id = ?''', (sell_id, user_id))
+            conn.commit()
+            return c.rowcount > 0
+        except Exception as e:
+            logger.error(f"❌ Lỗi xóa sell history: {e}")
+            return False
+        finally:
+            if conn:
+                conn.close()
+    
+    def update_sell_history(sell_id, user_id, amount=None, sell_price=None):
+        """Cập nhật lịch sử bán"""
+        conn = None
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            
+            # Lấy thông tin cũ
+            c.execute('''SELECT amount, sell_price, total_sold, total_cost FROM sell_history WHERE id = ? AND user_id = ?''', (sell_id, user_id))
+            old = c.fetchone()
+            if not old:
+                return False, "Không tìm thấy lệnh bán"
+            
+            old_amount, old_price, old_total_sold, old_total_cost = old
+            
+            # Tính toán mới
+            new_amount = amount if amount is not None else old_amount
+            new_price = sell_price if sell_price is not None else old_price
+            new_total_sold = new_amount * new_price
+            new_profit = new_total_sold - old_total_cost
+            new_profit_percent = (new_profit / old_total_cost * 100) if old_total_cost > 0 else 0
+            
+            c.execute('''UPDATE sell_history 
+                        SET amount = ?, sell_price = ?, total_sold = ?, profit = ?, profit_percent = ?
+                        WHERE id = ? AND user_id = ?''',
+                      (new_amount, new_price, new_total_sold, new_profit, new_profit_percent, sell_id, user_id))
+            conn.commit()
+            return True, "Đã cập nhật thành công"
+        except Exception as e:
+            logger.error(f"❌ Lỗi update sell history: {e}")
+            return False, str(e)
+        finally:
+            if conn:
+                conn.close()
 
     def edit_income(income_id, user_id, amount=None, source=None, note=None, currency=None):
         """Sửa thông tin khoản thu
@@ -3464,6 +3549,185 @@ try:
         
         # Ghi log giao dịch
         logger.info(f"💰 SELL: User {target_user_id} bán {sell_amount} {symbol} @ {sell_price}, profit: {profit}")
+
+    @auto_update_user
+    @require_permission('view')
+    async def sells_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Xem lịch sử bán: /sells"""
+        user_id = ctx.bot_data.get('effective_user_id', update.effective_user.id)
+        
+        sells = get_sell_history(user_id, 20)
+        
+        if not sells:
+            await update.message.reply_text("📭 Chưa có lịch sử bán nào!")
+            return
+        
+        msg = "📋 *LỊCH SỬ BÁN*\n━━━━━━━━━━━━━━━━\n\n"
+        for sell in sells:
+            sell_id, symbol, amount, sell_price, buy_price, profit, profit_pct, sell_date, created = sell
+            emoji = "✅" if profit >= 0 else "❌"
+            msg += f"{emoji} *#{sell_id}* {sell_date}: {symbol}\n"
+            msg += f"   SL: `{amount:.4f}` @ `{fmt_price(sell_price)}`\n"
+            msg += f"   LN: `{fmt_price(profit)}` ({profit_pct:+.2f}%)\n\n"
+        
+        msg += f"🕐 {format_vn_time_short()}"
+        
+        # Thêm nút xem chi tiết
+        keyboard = []
+        row = []
+        for sell in sells[:5]:
+            sell_id = sell[0]
+            row.append(InlineKeyboardButton(f"#{sell_id}", callback_data=f"sell_detail_{sell_id}"))
+            if len(row) == 3:
+                keyboard.append(row)
+                row = []
+        if row:
+            keyboard.append(row)
+        keyboard.append([InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")])
+        
+        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
+    
+    
+    @auto_update_user
+    @require_permission('delete')
+    async def delete_sell_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Xóa lịch sử bán: /delsell [id]"""
+        user_id = ctx.bot_data.get('effective_user_id', update.effective_user.id)
+        
+        if not ctx.args:
+            # Hiển thị danh sách để chọn
+            sells = get_sell_history(user_id, 10)
+            if not sells:
+                await update.message.reply_text("📭 Không có lịch sử bán nào để xóa!")
+                return
+            
+            msg = "🗑 *CHỌN LỆNH BÁN CẦN XÓA*\n━━━━━━━━━━━━━━━━\n\n"
+            keyboard = []
+            row = []
+            
+            for sell in sells:
+                sell_id, symbol, amount, sell_price, buy_price, profit, profit_pct, sell_date, created = sell
+                msg += f"• #{sell_id} {sell_date}: {symbol} {amount:.4f} @ {fmt_price(sell_price)} ({profit_pct:+.2f}%)\n"
+                
+                row.append(InlineKeyboardButton(f"🗑 #{sell_id}", callback_data=f"del_sell_{sell_id}"))
+                if len(row) == 3:
+                    keyboard.append(row)
+                    row = []
+            
+            if row:
+                keyboard.append(row)
+            keyboard.append([InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")])
+            
+            msg += f"\n🕐 {format_vn_time_short()}"
+            await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
+            return
+        
+        try:
+            sell_id = int(ctx.args[0])
+            
+            # Hỏi xác nhận
+            keyboard = [[
+                InlineKeyboardButton("✅ Xác nhận", callback_data=f"confirm_del_sell_{sell_id}"),
+                InlineKeyboardButton("❌ Hủy", callback_data="cancel_del_sell")
+            ]]
+            
+            await update.message.reply_text(f"⚠️ *Xác nhận xóa lệnh bán #{sell_id}?*", 
+                                           parse_mode=ParseMode.MARKDOWN,
+                                           reply_markup=InlineKeyboardMarkup(keyboard))
+        except ValueError:
+            await update.message.reply_text("❌ ID không hợp lệ!")
+    
+    
+    @auto_update_user
+    @require_permission('edit')
+    async def edit_sell_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Sửa lịch sử bán: /editsell [id] [số lượng] [giá]"""
+        user_id = ctx.bot_data.get('effective_user_id', update.effective_user.id)
+        
+        if len(ctx.args) < 1:
+            # Hiển thị danh sách để chọn
+            sells = get_sell_history(user_id, 10)
+            if not sells:
+                await update.message.reply_text("📭 Không có lịch sử bán nào để sửa!")
+                return
+            
+            msg = "✏️ *CHỌN LỆNH BÁN CẦN SỬA*\n━━━━━━━━━━━━━━━━\n\n"
+            keyboard = []
+            row = []
+            
+            for sell in sells:
+                sell_id, symbol, amount, sell_price, buy_price, profit, profit_pct, sell_date, created = sell
+                msg += f"• #{sell_id} {sell_date}: {symbol} {amount:.4f} @ {fmt_price(sell_price)} ({profit_pct:+.2f}%)\n"
+                
+                row.append(InlineKeyboardButton(f"✏️ #{sell_id}", callback_data=f"edit_sell_{sell_id}"))
+                if len(row) == 3:
+                    keyboard.append(row)
+                    row = []
+            
+            if row:
+                keyboard.append(row)
+            keyboard.append([InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")])
+            
+            msg += f"\n🕐 {format_vn_time_short()}"
+            await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
+            return
+        
+        if len(ctx.args) == 1:
+            # Xem chi tiết
+            try:
+                sell_id = int(ctx.args[0])
+                sell = get_sell_detail(sell_id, user_id)
+                if not sell:
+                    await update.message.reply_text(f"❌ Không tìm thấy lệnh bán #{sell_id}")
+                    return
+                
+                id, user, symbol, amount, sell_price, buy_price, total_sold, total_cost, profit, profit_pct, sell_date, created = sell
+                
+                msg = (f"📝 *LỆNH BÁN #{sell_id}*\n━━━━━━━━━━━━━━━━\n\n"
+                       f"*{symbol}*\n"
+                       f"📅 Ngày bán: {sell_date}\n"
+                       f"📊 Số lượng: `{amount:.4f}`\n"
+                       f"💰 Giá bán: `{fmt_price(sell_price)}`\n"
+                       f"💵 Giá vốn: `{fmt_price(buy_price)}`\n"
+                       f"💎 Giá trị bán: `{fmt_price(total_sold)}`\n"
+                       f"{'✅' if profit>=0 else '❌'} Lợi nhuận: `{fmt_price(profit)}` ({profit_pct:+.2f}%)\n\n"
+                       f"*Sửa:* `/editsell {sell_id} [sl] [giá]`\n"
+                       f"*Xóa:* `/delsell {sell_id}`\n\n"
+                       f"🕐 {format_vn_time()}")
+                
+                await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+            except ValueError:
+                await update.message.reply_text("❌ ID không hợp lệ!")
+        
+        elif len(ctx.args) == 3:
+            # Thực hiện sửa
+            try:
+                sell_id = int(ctx.args[0])
+                new_amount = float(ctx.args[1])
+                new_price = float(ctx.args[2])
+                
+                if new_amount <= 0 or new_price <= 0:
+                    await update.message.reply_text("❌ Số lượng và giá phải > 0")
+                    return
+                
+                success, message = update_sell_history(sell_id, user_id, new_amount, new_price)
+                
+                if success:
+                    sell = get_sell_detail(sell_id, user_id)
+                    if sell:
+                        id, user, symbol, amount, sell_price, buy_price, total_sold, total_cost, profit, profit_pct, sell_date, created = sell
+                        msg = (f"✅ *ĐÃ SỬA LỆNH BÁN #{sell_id}*\n━━━━━━━━━━━━━━━━\n\n"
+                               f"*{symbol}*\n"
+                               f"📊 SL mới: `{amount:.4f}`\n"
+                               f"💰 Giá mới: `{fmt_price(sell_price)}`\n"
+                               f"{'✅' if profit>=0 else '❌'} LN: `{fmt_price(profit)}` ({profit_pct:+.2f}%)\n\n"
+                               f"🕐 {format_vn_time()}")
+                        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+                else:
+                    await update.message.reply_text(f"❌ {message}")
+                    
+            except ValueError:
+                await update.message.reply_text("❌ /editsell [id] [số lượng] [giá]")
         
     @auto_update_user
     @require_permission('edit')
@@ -9039,7 +9303,84 @@ try:
                     await safe_edit_message(query, "❌ Lỗi khi lưu quyền!")
                 
                 return
-        
+
+            # ===========================================
+            # XỬ LÝ CALLBACK LIÊN QUAN ĐẾN SELL HISTORY
+            # ===========================================
+            
+            if data.startswith("sell_detail_"):
+                sell_id = int(data.replace("sell_detail_", ""))
+                sell = get_sell_detail(sell_id, target_user_id)
+                
+                if not sell:
+                    await safe_edit_message(query, f"❌ Không tìm thấy lệnh bán #{sell_id}")
+                    return
+                
+                id, user, symbol, amount, sell_price, buy_price, total_sold, total_cost, profit, profit_pct, sell_date, created = sell
+                
+                msg = (f"📝 *LỆNH BÁN #{sell_id}*\n━━━━━━━━━━━━━━━━\n\n"
+                       f"*{symbol}*\n"
+                       f"📅 Ngày bán: {sell_date}\n"
+                       f"📊 Số lượng: `{amount:.4f}`\n"
+                       f"💰 Giá bán: `{fmt_price(sell_price)}`\n"
+                       f"💵 Giá vốn: `{fmt_price(buy_price)}`\n"
+                       f"💎 Giá trị bán: `{fmt_price(total_sold)}`\n"
+                       f"{'✅' if profit>=0 else '❌'} Lợi nhuận: `{fmt_price(profit)}` ({profit_pct:+.2f}%)\n\n"
+                       f"🕐 {format_vn_time()}")
+                
+                keyboard = [[InlineKeyboardButton("🔙 Quay lại", callback_data="back_to_invest")]]
+                await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                return
+
+            if data.startswith("del_sell_"):
+                sell_id = int(data.replace("del_sell_", ""))
+                
+                keyboard = [[
+                    InlineKeyboardButton("✅ Xác nhận", callback_data=f"confirm_del_sell_{sell_id}"),
+                    InlineKeyboardButton("❌ Hủy", callback_data="cancel_del_sell")
+                ]]
+                
+                await safe_edit_message(query, f"⚠️ *Xác nhận xóa lệnh bán #{sell_id}?*", 
+                                       reply_markup=InlineKeyboardMarkup(keyboard))
+                return
+
+            if data.startswith("confirm_del_sell_"):
+                sell_id = int(data.replace("confirm_del_sell_", ""))
+                
+                if delete_sell_history(sell_id, target_user_id):
+                    await safe_edit_message(query, f"✅ *Đã xóa lệnh bán #{sell_id}*")
+                else:
+                    await safe_edit_message(query, f"❌ Không thể xóa lệnh bán #{sell_id}")
+                return
+
+            if data == "cancel_del_sell":
+                await safe_edit_message(query, "❌ Đã hủy xóa.")
+                return
+
+            if data.startswith("edit_sell_"):
+                sell_id = int(data.replace("edit_sell_", ""))
+                sell = get_sell_detail(sell_id, target_user_id)
+                
+                if not sell:
+                    await safe_edit_message(query, f"❌ Không tìm thấy lệnh bán #{sell_id}")
+                    return
+                
+                id, user, symbol, amount, sell_price, buy_price, total_sold, total_cost, profit, profit_pct, sell_date, created = sell
+                
+                msg = (f"✏️ *SỬA LỆNH BÁN #{sell_id}*\n━━━━━━━━━━━━━━━━\n\n"
+                       f"*{symbol}*\n"
+                       f"📊 SL hiện tại: `{amount:.4f}`\n"
+                       f"💰 Giá hiện tại: `{fmt_price(sell_price)}`\n\n"
+                       f"*Nhập lệnh:*\n"
+                       f"`/editsell {sell_id} [số lượng mới] [giá mới]`\n\n"
+                       f"*Ví dụ:*\n"
+                       f"`/editsell {sell_id} 0.3 50000`\n\n"
+                       f"🕐 {format_vn_time_short()}")
+                
+                keyboard = [[InlineKeyboardButton("🔙 Quay lại", callback_data="back_to_invest")]]
+                await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                return
+                
             # ===========================================
             # XỬ LÝ CALLBACK KHÔNG XÁC ĐỊNH
             # ===========================================
@@ -9611,6 +9952,9 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
             app.add_handler(CommandHandler("lang", lang_command))
             app.add_handler(CommandHandler("export_secure", export_secure_command))
             app.add_handler(CommandHandler("export_expense", export_expense_command))
+            app.add_handler(CommandHandler("sells", sells_command))
+            app.add_handler(CommandHandler("delsell", delete_sell_command))
+            app.add_handler(CommandHandler("editsell", edit_sell_command))
             app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_chat_members))
             app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
             app.add_handler(CallbackQueryHandler(handle_sell_confirmation, pattern="^(confirm_sell_|cancel_sell)"))
