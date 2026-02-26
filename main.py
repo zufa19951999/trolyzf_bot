@@ -7436,6 +7436,7 @@ try:
                 [InlineKeyboardButton("🔐 PHÂN QUYỀN CHI TIẾT", callback_data="settings_permissions")],
                 [InlineKeyboardButton("📋 DANH SÁCH QUYỀN", callback_data="settings_list")],
                 [InlineKeyboardButton("🔄 ĐỒNG BỘ ADMIN", callback_data="settings_sync")],
+                [InlineKeyboardButton("🌐 NGÔN NGỮ", callback_data="lang_menu")],
                 [InlineKeyboardButton("🔙 VỀ MENU CHÍNH", callback_data="back_to_main")]
             ]
             
