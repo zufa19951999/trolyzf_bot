@@ -9370,9 +9370,9 @@ bot_cache_hits_usdt {usdt_cache.get_stats()['hit_rate']}
             app.add_handler(CommandHandler("export_expense", export_expense_command))
             app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_chat_members))
             app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-            app.add_handler(CallbackQueryHandler(handle_callback))
             app.add_handler(CallbackQueryHandler(handle_sell_confirmation, pattern="^(confirm_sell_|cancel_sell)"))
-
+            app.add_handler(CallbackQueryHandler(handle_callback))
+        
             logger.info("✅ Đã đăng ký handlers")
             
             # Khởi động thông minh
