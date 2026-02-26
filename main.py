@@ -8084,11 +8084,13 @@ try:
             # NHÓM 2: XỬ LÝ XÓA GIAO DỊCH COIN (ƯU TIÊN CAO)
             # ===========================================
             
-            if data.startswith("confirm_del_"):
+            # ===========================================
+            # XỬ LÝ XÓA GIAO DỊCH MUA (COIN)
+            # ===========================================
+            if data.startswith("confirm_del_") and not data.startswith("confirm_del_sell_") and not data.startswith("confirm_del_cat_"):
                 tx_id_str = data.replace("confirm_del_", "")
-                logger.info(f"💰 Xác nhận xóa giao dịch: {tx_id_str}")
+                logger.info(f"💰 Xác nhận xóa giao dịch mua: {tx_id_str}")
                 
-                # Kiểm tra nếu là số (xóa coin)
                 if tx_id_str.isdigit():
                     tx_id = int(tx_id_str)
                     
@@ -8105,14 +8107,12 @@ try:
                     
                     tx_owner_id, symbol, amount = result
                     
-                    # Chỉ cho phép xóa nếu là chủ sở hữu hoặc admin
-                    can_delete = False
+                    # Kiểm tra quyền xóa
                     can_delete = False
                     if tx_owner_id == target_user_id:
                         can_delete = True
-                    elif is_admin and chat_type != 'private':  # Trong group mới được admin xóa
+                    elif is_admin and chat_type != 'private':
                         can_delete = True
-
                     
                     if not can_delete:
                         conn.close()
@@ -8124,7 +8124,7 @@ try:
                     conn.commit()
                     conn.close()
                     
-                    msg = (f"✅ *ĐÃ XÓA GIAO DỊCH #{tx_id}*\n━━━━━━━━━━━━━━━━\n\n"
+                    msg = (f"✅ *ĐÃ XÓA GIAO DỊCH MUA #{tx_id}*\n━━━━━━━━━━━━━━━━\n\n"
                            f"• Coin: {symbol}\n"
                            f"• Số lượng: {amount:.4f}\n\n"
                            f"🕐 {format_vn_time()}")
@@ -8133,14 +8133,75 @@ try:
                     
                     await safe_edit_message(query, msg, reply_markup=InlineKeyboardMarkup(keyboard))
                     return
-                
-                # Nếu là cat_ (xóa danh mục) - đã xử lý ở nhóm 1
-                elif tx_id_str.startswith("cat_"):
-                    return
-                
                 else:
                     await safe_edit_message(query, "❌ ID không hợp lệ!")
                     return
+
+            # ===========================================
+            # XỬ LÝ XÓA LỊCH SỬ BÁN (SELL)
+            # ===========================================
+            if data.startswith("confirm_del_sell_"):
+                sell_id = int(data.replace("confirm_del_sell_", ""))
+                logger.info(f"💰 Xác nhận xóa lệnh bán: {sell_id}")
+                
+                if delete_sell_history(sell_id, target_user_id):
+                    await safe_edit_message(
+                        query, 
+                        f"✅ *Đã xóa lệnh bán #{sell_id}*",
+                        reply_markup=InlineKeyboardMarkup([[
+                            InlineKeyboardButton("📋 Xem lịch sử bán", callback_data="show_sells"),
+                            InlineKeyboardButton("🔙 Về menu", callback_data="back_to_invest")
+                        ]])
+                    )
+                else:
+                    await safe_edit_message(query, f"❌ Không thể xóa lệnh bán #{sell_id}")
+                return
+
+            # ===========================================
+            # XỬ LÝ XÓA DANH MỤC CHI TIÊU
+            # ===========================================
+            if data.startswith("confirm_del_cat_"):
+                cat_id = data.replace("confirm_del_cat_", "")
+                logger.info(f"📂 Xác nhận xóa danh mục ID: {cat_id}")
+                
+                try:
+                    category_id = int(cat_id)
+                except ValueError:
+                    await safe_edit_message(query, "❌ ID danh mục không hợp lệ!")
+                    return
+                
+                await query.edit_message_text("🔄 Đang xóa danh mục...", parse_mode=None)
+                
+                try:
+                    success, result, deleted_count = delete_category(category_id, owner_id)
+                    
+                    if success:
+                        safe_result = escape_markdown(str(result))
+                        msg = (f"✅ *ĐÃ XÓA DANH MỤC*\n"
+                               f"━━━━━━━━━━━━━━━━\n\n"
+                               f"📋 Đã xóa danh mục: *{safe_result}*\n"
+                               f"💰 Đã xóa *{deleted_count}* khoản chi\n\n"
+                               f"🕐 {format_vn_time()}")
+                    else:
+                        safe_result = escape_markdown(str(result))
+                        msg = (f"❌ *LỖI*\n"
+                               f"━━━━━━━━━━━━━━━━\n\n"
+                               f"{safe_result}\n\n"
+                               f"🕐 {format_vn_time()}")
+                    
+                    safe_msg = escape_markdown(msg)
+                    keyboard = [[
+                        InlineKeyboardButton("📋 Xem danh mục", callback_data="expense_categories"),
+                        InlineKeyboardButton("🔙 Về menu", callback_data="back_to_expense")
+                    ]]
+                    
+                    await safe_edit_message(query, safe_msg, reply_markup=InlineKeyboardMarkup(keyboard))
+                    
+                except Exception as e:
+                    logger.error(f"❌ Lỗi xóa danh mục: {e}")
+                    await query.edit_message_text(f"❌ Lỗi: {str(e)[:100]}", parse_mode=None)
+                
+                return
             
             # ===========================================
             # NHÓM 3: CÁC CALLBACK CHÍNH XÁC (MENU CHÍNH)
